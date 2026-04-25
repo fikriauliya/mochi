@@ -2,45 +2,158 @@
 
 @layer base {
   :root {
-    @apply font-sans;
+    @apply font-sans antialiased;
+    color-scheme: light;
   }
 
   body {
-    @apply grid place-items-center min-w-[320px] min-h-screen relative m-0 bg-background text-foreground;
+    @apply min-w-[320px] min-h-screen relative m-0 bg-background text-foreground overflow-hidden;
+  }
+
+  /* Paper texture: tiny graph-paper dots + a soft grain overlay.
+     Two layers: a fine dot grid, then a subtle warm vignette. */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -2;
+    pointer-events: none;
+    background-image:
+      radial-gradient(circle at 1px 1px, rgba(42, 36, 33, 0.07) 1px, transparent 1.4px);
+    background-size: 22px 22px;
+  }
+
+  /* Warm light-from-the-window blob in top-right + soft cream pool bottom-left */
+  body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(60% 50% at 92% 6%, rgba(247, 183, 176, 0.32), transparent 70%),
+      radial-gradient(55% 45% at 6% 96%, rgba(217, 164, 65, 0.18), transparent 75%),
+      radial-gradient(80% 60% at 50% 110%, rgba(45, 95, 102, 0.10), transparent 70%);
+  }
+
+  ::selection {
+    background: var(--color-mochi-soft);
+    color: var(--color-mochi-deep);
+  }
+
+  /* Quiet scrollbars */
+  *::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: var(--color-line);
+    border-radius: 999px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  *::-webkit-scrollbar-thumb:hover {
+    background: var(--color-line-strong);
+    background-clip: padding-box;
+    border: 2px solid transparent;
+  }
+
+  /* Display font defaults */
+  .font-display,
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    font-variation-settings: "SOFT" 100, "WONK" 1, "opsz" 144;
+    letter-spacing: -0.01em;
   }
 }
 
-/* cool Bun background animation 😎 */
-body::before {
-  content: "";
-  position: fixed;
-  inset: 0;
-  z-index: -1;
-  opacity: 0.05;
-  background: url("./logo.svg");
-  background-size: 256px;
-  transform: rotate(-12deg) scale(1.35);
-  animation: slide 30s linear infinite;
-  pointer-events: none;
+/* ---------- Mochi mascot ---------- */
+@keyframes mochi-breathe {
+  0%, 100% { transform: scale(1, 1); }
+  50%      { transform: scale(1.03, 0.97); }
+}
+@keyframes mochi-squish {
+  0%, 100% { transform: scale(1, 1); }
+  35%      { transform: scale(1.10, 0.86); }
+  70%      { transform: scale(0.96, 1.06); }
+}
+@keyframes mochi-blink {
+  0%, 92%, 100% { transform: scaleY(1); }
+  94%, 98%      { transform: scaleY(0.05); }
+}
+@keyframes steam-rise {
+  0%   { transform: translateY(0) scale(0.6); opacity: 0; }
+  20%  { opacity: 0.85; }
+  100% { transform: translateY(-22px) scale(1.4); opacity: 0; }
+}
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-4px); }
 }
 
-@keyframes slide {
-  from {
-    background-position: 0 0;
-  }
-  to {
-    background-position: 256px 224px;
-  }
+.mochi-body {
+  transform-origin: 50% 92%;
+  animation: mochi-breathe 4.5s ease-in-out infinite;
+}
+.mochi-typing .mochi-body {
+  animation: mochi-squish 1.1s ease-in-out infinite;
+}
+.mochi-eye {
+  transform-origin: center;
+  animation: mochi-blink 5.2s ease-in-out infinite;
+}
+.steam {
+  animation: steam-rise 1.6s ease-out infinite;
+}
+.steam-2 {
+  animation-delay: 0.55s;
+}
+.steam-3 {
+  animation-delay: 1.05s;
 }
 
-@keyframes spin {
-  from {
-    transform: rotate(0);
-  }
-  to {
-    transform: rotate(360deg);
-  }
+/* ---------- Bubbles entrance ---------- */
+@keyframes bubble-in {
+  0%   { opacity: 0; transform: translateY(8px) scale(0.96); }
+  100% { opacity: 1; transform: translateY(0)    scale(1); }
 }
+.bubble-in {
+  animation: bubble-in 0.42s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---------- Page enter stagger ---------- */
+@keyframes rise-in {
+  0%   { opacity: 0; transform: translateY(10px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+.rise-in {
+  animation: rise-in 0.7s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* ---------- Quick action chips ---------- */
+@keyframes chip-tilt {
+  0%, 100% { transform: rotate(0deg); }
+  50%      { transform: rotate(-1.5deg); }
+}
+.chip:hover .chip-icon {
+  animation: chip-tilt 0.6s ease-in-out;
+}
+
+/* ---------- Typing dots ---------- */
+@keyframes dot-bounce {
+  0%, 80%, 100% { transform: translateY(0); opacity: 0.4; }
+  40%           { transform: translateY(-4px); opacity: 1; }
+}
+.dot {
+  animation: dot-bounce 1.1s ease-in-out infinite;
+}
+.dot-2 { animation-delay: 0.15s; }
+.dot-3 { animation-delay: 0.3s; }
 
 @media (prefers-reduced-motion) {
   *,
