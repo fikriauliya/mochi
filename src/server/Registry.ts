@@ -1,6 +1,7 @@
-import { Context, Data, Effect, Layer, Ref, Schema as S } from "effect";
-import { FileSystem, Path } from "@effect/platform";
-import { App } from "./Schema";
+import { Database } from "bun:sqlite";
+import { FileSystem } from "@effect/platform";
+import { Context, Data, Effect, Layer } from "effect";
+import { App, type AppStatus } from "./Schema";
 
 export class RegistryError extends Data.TaggedError("RegistryError")<{
   readonly message: string;
@@ -25,100 +26,168 @@ export class RegistryService extends Context.Tag("RegistryService")<
   }
 >() {}
 
-const REGISTRY_DIR = "apps";
-const REGISTRY_FILE = "registry.json";
+const DATA_DIR = "data";
+const DB_PATH = `${DATA_DIR}/mochi.db`;
 
-const decodeApps = S.decodeUnknown(S.Array(App));
+const SCHEMA = `
+  CREATE TABLE IF NOT EXISTS apps (
+    id          TEXT PRIMARY KEY,
+    session_id  TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    emoji       TEXT NOT NULL,
+    description TEXT NOT NULL,
+    prompt      TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    created_at  INTEGER NOT NULL,
+    updated_at  INTEGER NOT NULL,
+    last_error  TEXT
+  );
+  CREATE INDEX IF NOT EXISTS apps_created_at ON apps(created_at DESC);
+`;
+
+type Row = {
+  id: string;
+  session_id: string;
+  name: string;
+  emoji: string;
+  description: string;
+  prompt: string;
+  status: string;
+  created_at: number;
+  updated_at: number;
+  last_error: string | null;
+};
+
+const rowToApp = (row: Row): App => ({
+  id: row.id,
+  sessionId: row.session_id,
+  name: row.name,
+  emoji: row.emoji,
+  description: row.description,
+  prompt: row.prompt,
+  status: row.status as AppStatus,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at,
+  ...(row.last_error != null ? { lastError: row.last_error } : {}),
+});
+
+const wrapDb = <A>(work: () => A) =>
+  Effect.try({
+    try: work,
+    catch: (cause) =>
+      new RegistryError({
+        message: cause instanceof Error ? cause.message : String(cause),
+        cause,
+      }),
+  });
 
 export const RegistryLive = Layer.scoped(
   RegistryService,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const sema = yield* Effect.makeSemaphore(1);
-    const ref = yield* Ref.make<ReadonlyArray<App>>([]);
+    yield* fs.makeDirectory(DATA_DIR, { recursive: true }).pipe(Effect.ignore);
 
-    const file = path.join(REGISTRY_DIR, REGISTRY_FILE);
-    const tmpFile = path.join(REGISTRY_DIR, `${REGISTRY_FILE}.tmp`);
-
-    // ensure apps/ exists; tolerate already-existing
-    yield* fs.makeDirectory(REGISTRY_DIR, { recursive: true }).pipe(Effect.ignore);
-
-    // initial load
-    yield* Effect.gen(function* () {
-      const exists = yield* fs.exists(file);
-      if (!exists) return;
-      const text = yield* fs.readFileString(file);
-      const json = yield* Effect.try({
-        try: () => JSON.parse(text) as unknown,
-        catch: (cause) => new RegistryError({ message: "registry.json is not valid JSON", cause }),
-      });
-      const apps = yield* decodeApps(json).pipe(
-        Effect.mapError(
-          (e) => new RegistryError({ message: "registry.json failed schema check", cause: e }),
-        ),
-      );
-      yield* Ref.set(ref, apps);
-    }).pipe(
-      Effect.catchTag("RegistryError", (e) =>
-        Effect.logWarning(`Registry load failed: ${e.message}; starting with empty registry`),
-      ),
+    // Open DB. SQLite handles concurrent reads/writes itself; we don't need
+    // a Semaphore or in-memory cache. WAL mode lets readers and writers not
+    // block each other.
+    const db = yield* Effect.acquireRelease(
+      Effect.sync(() => {
+        const d = new Database(DB_PATH, { create: true });
+        d.exec("PRAGMA journal_mode = WAL");
+        d.exec("PRAGMA synchronous = NORMAL");
+        d.exec("PRAGMA foreign_keys = ON");
+        d.exec(SCHEMA);
+        return d;
+      }),
+      (d) => Effect.sync(() => d.close()),
     );
 
-    const persist = (next: ReadonlyArray<App>) =>
-      sema.withPermits(1)(
-        Effect.gen(function* () {
-          const text = JSON.stringify(next, null, 2);
-          yield* fs.writeFileString(tmpFile, text).pipe(
-            Effect.mapError(
-              (cause) => new RegistryError({ message: "write tmp registry failed", cause }),
-            ),
-          );
-          yield* fs.rename(tmpFile, file).pipe(
-            Effect.mapError(
-              (cause) => new RegistryError({ message: "rename registry failed", cause }),
-            ),
-          );
-          yield* Ref.set(ref, next);
-        }),
+    const listStmt = db.prepare<Row, []>(
+      "SELECT * FROM apps ORDER BY created_at DESC",
+    );
+    const getStmt = db.prepare<Row, [string]>(
+      "SELECT * FROM apps WHERE id = ?",
+    );
+    const upsertStmt = db.prepare<
+      unknown,
+      [
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        string,
+        number,
+        number,
+        string | null,
+      ]
+    >(`
+      INSERT INTO apps (
+        id, session_id, name, emoji, description,
+        prompt, status, created_at, updated_at, last_error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        session_id  = excluded.session_id,
+        name        = excluded.name,
+        emoji       = excluded.emoji,
+        description = excluded.description,
+        prompt      = excluded.prompt,
+        status      = excluded.status,
+        updated_at  = excluded.updated_at,
+        last_error  = excluded.last_error
+    `);
+    const removeStmt = db.prepare<unknown, [string]>(
+      "DELETE FROM apps WHERE id = ?",
+    );
+
+    const persist = (app: App) =>
+      wrapDb(() =>
+        upsertStmt.run(
+          app.id,
+          app.sessionId,
+          app.name,
+          app.emoji,
+          app.description,
+          app.prompt,
+          app.status,
+          app.createdAt,
+          app.updatedAt,
+          app.lastError ?? null,
+        ),
       );
 
     return RegistryService.of({
-      list: Ref.get(ref),
+      list: wrapDb(() => listStmt.all().map(rowToApp)),
+
       get: (id) =>
-        Ref.get(ref).pipe(
-          Effect.flatMap((arr) => {
-            const found = arr.find((a) => a.id === id);
-            return found ? Effect.succeed(found) : Effect.fail(new AppNotFound({ id }));
-          }),
-        ),
+        Effect.gen(function* () {
+          const row = yield* wrapDb(() => getStmt.get(id));
+          if (!row) return yield* Effect.fail(new AppNotFound({ id }));
+          return rowToApp(row);
+        }),
+
       upsert: (app) =>
         Effect.gen(function* () {
-          const arr = yield* Ref.get(ref);
-          const existing = arr.find((a) => a.id === app.id);
-          const next = existing
-            ? arr.map((a) => (a.id === app.id ? app : a))
-            : [...arr, app];
-          yield* persist(next);
+          yield* persist(app);
           return app;
         }),
+
       patch: (id, patch) =>
         Effect.gen(function* () {
-          const arr = yield* Ref.get(ref);
-          const existing = arr.find((a) => a.id === id);
-          if (!existing) return yield* Effect.fail(new AppNotFound({ id }));
-          const merged: App = { ...existing, ...patch, updatedAt: Date.now() };
-          const next = arr.map((a) => (a.id === id ? merged : a));
-          yield* persist(next);
+          const row = yield* wrapDb(() => getStmt.get(id));
+          if (!row) return yield* Effect.fail(new AppNotFound({ id }));
+          const current = rowToApp(row);
+          const merged: App = {
+            ...current,
+            ...patch,
+            updatedAt: Date.now(),
+          };
+          yield* persist(merged);
           return merged;
         }),
-      remove: (id) =>
-        Effect.gen(function* () {
-          const arr = yield* Ref.get(ref);
-          const next = arr.filter((a) => a.id !== id);
-          if (next.length === arr.length) return; // idempotent
-          yield* persist(next);
-        }),
+
+      remove: (id) => wrapDb(() => removeStmt.run(id)).pipe(Effect.asVoid),
     });
   }),
 );

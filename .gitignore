@@ -40,3 +40,6 @@ mochi-*.png
 # Generated apps (keep .gitkeep)
 apps/*
 !apps/.gitkeep
+
+# Server data (sqlite)
+data/
