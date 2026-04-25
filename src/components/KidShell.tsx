@@ -89,14 +89,14 @@ function KidHome(props: {
           className="font-display text-2xl sm:text-3xl lg:text-4xl text-ink-soft italic text-center"
           style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
         >
-          {lang === "id-ID" ? "Pencet & ngomong" : "Tap & talk"}
+          Tap &amp; talk
         </p>
       </div>
 
       {ready.length > 0 && (
         <div className="px-4 pb-6 sm:pb-8">
           <h2 className="text-[0.78rem] uppercase tracking-[0.22em] text-ink-faint text-center mb-3">
-            {lang === "id-ID" ? "Mainan kamu" : "Your stuff"}
+            Your stuff
           </h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 max-w-5xl mx-auto">
             {ready.slice(0, 10).map((app) => (
@@ -185,9 +185,7 @@ function KidMicOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const promptText =
-    speech.transcript ||
-    (lang === "id-ID" ? "Aku dengerin…" : "I'm listening…");
+  const promptText = speech.transcript || "I'm listening…";
 
   return (
     <div className="fixed inset-0 z-50 bg-cream/95 backdrop-blur-md flex flex-col items-center justify-center p-6">
@@ -208,9 +206,7 @@ function KidMicOverlay({
 
       {speech.state === "denied" && (
         <p className="text-mom italic mt-6">
-          {lang === "id-ID"
-            ? "Mikrofon diblokir — minta tolong yang lebih besar."
-            : "Mic blocked — ask a grown-up for help."}
+          Mic blocked — ask a grown-up for help.
         </p>
       )}
 
@@ -273,16 +269,10 @@ function KidBuildView({
 
   const headline =
     phase === "done"
-      ? lang === "id-ID"
-        ? "Sudah jadi!"
-        : "Ready!"
+      ? "Ready!"
       : phase === "error"
-        ? lang === "id-ID"
-          ? "Aduh, nyangkut!"
-          : "Oops, stuck!"
-        : lang === "id-ID"
-          ? "Lagi dibikin…"
-          : "Making it…";
+        ? "Oops, stuck!"
+        : "Making it…";
 
   return (
     <div className="h-dvh w-screen bg-cream flex flex-col items-center justify-center gap-8 px-6 relative">
