@@ -68,6 +68,13 @@ export type UseSpeechOptions = {
   onTranscript?: (text: string, isFinal: boolean) => void;
   /** Called once the user finishes speaking with the final text. */
   onFinal?: (text: string) => void;
+  /**
+   * Stop recognition after this many ms of silence following the most recent
+   * transcribed word. Browsers' built-in end-of-speech detection is sluggish
+   * (≈2 s in Chrome), so we close the loop ourselves. Set to 0 to disable.
+   * @default 800
+   */
+  silenceMs?: number;
 };
 
 export type UseSpeechReturn = {
@@ -84,15 +91,20 @@ export type UseSpeechReturn = {
  * `start()`; the consumer drives subsequent recordings.
  */
 export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
-  const { lang, onTranscript, onFinal } = opts;
+  const { lang, onTranscript, onFinal, silenceMs = 800 } = opts;
   const [supported, setSupported] = React.useState(false);
   const [state, setState] = React.useState<RecState>("idle");
   const [transcript, setTranscript] = React.useState("");
   const recRef = React.useRef<AnyRecognition | null>(null);
+  const silenceMsRef = React.useRef(silenceMs);
 
   React.useEffect(() => {
     setSupported(getRecognitionCtor() != null);
   }, []);
+
+  React.useEffect(() => {
+    silenceMsRef.current = silenceMs;
+  }, [silenceMs]);
 
   // Latest callbacks via ref so we don't re-create the recognition object.
   const onTranscriptRef = React.useRef(onTranscript);
@@ -116,6 +128,30 @@ export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
     rec.maxAlternatives = 1;
 
     let finalText = "";
+    let lastInterim = "";
+    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const armSilenceTimer = () => {
+      if (silenceMsRef.current <= 0) return;
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = setTimeout(() => {
+        silenceTimer = null;
+        // Closing the recognition triggers `onend`, which submits whatever
+        // text we've accumulated so far.
+        try {
+          rec.stop();
+        } catch {
+          /* ignore — rec may already be stopping */
+        }
+      }, silenceMsRef.current);
+    };
+
+    const clearSilenceTimer = () => {
+      if (silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = null;
+      }
+    };
 
     rec.onstart = () => {
       setState("listening");
@@ -123,7 +159,6 @@ export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
     };
     rec.onresult = (e) => {
       let interim = "";
-      // SpeechRecognitionEvent.results is array-like
       for (let i = e.resultIndex; i < e.results.length; i++) {
         const result = e.results[i];
         if (!result || !result[0]) continue;
@@ -134,11 +169,17 @@ export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
           interim += text;
         }
       }
+      lastInterim = interim;
       const display = (finalText + interim).trim();
       setTranscript(display);
       onTranscriptRef.current?.(display, false);
+
+      // Restart the silence timer on every audible token. We only arm once we
+      // have *some* content so the user can pause initially without losing it.
+      if (display) armSilenceTimer();
     };
     rec.onerror = (e) => {
+      clearSilenceTimer();
       const err = (e as { error?: string }).error;
       if (err === "not-allowed" || err === "service-not-allowed") {
         setState("denied");
@@ -147,7 +188,10 @@ export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
       }
     };
     rec.onend = () => {
-      const cleaned = finalText.trim();
+      clearSilenceTimer();
+      // Browsers don't always commit the latest interim as `final` when we
+      // force-stop, so fall back to the last interim if final is empty.
+      const cleaned = (finalText.trim() || lastInterim.trim());
       if (cleaned) {
         onTranscriptRef.current?.(cleaned, true);
         onFinalRef.current?.(cleaned);
