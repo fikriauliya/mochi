@@ -387,18 +387,24 @@ function KidAppTile({
           e.stopPropagation();
           onMenu();
         }}
-        aria-label="More"
-        title="More"
+        aria-label="More options"
+        title="More options"
         className="
-          absolute top-1.5 right-1.5 size-9 2xl:size-11 rounded-full
-          flex items-center justify-center
-          bg-paper/80 border border-line text-ink-soft
-          hover:bg-cream-deep transition-colors
-          opacity-90 hover:opacity-100
-          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+          absolute top-2 right-2
+          inline-flex items-center justify-center gap-1.5
+          h-11 px-3 lg:h-12 lg:pl-3 lg:pr-3.5 2xl:h-14 2xl:px-4
+          rounded-full
+          bg-mochi-soft text-mochi-deep border border-mochi-deep/30
+          shadow-[0_4px_10px_-4px_rgba(224,114,107,0.5)]
+          hover:bg-mochi-deep hover:text-paper hover:border-transparent
+          active:scale-95 transition-all
+          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft focus-visible:ring-offset-2 focus-visible:ring-offset-paper
         "
       >
-        <MoreHorizontal className="size-4 2xl:size-5" />
+        <MoreHorizontal className="size-5 2xl:size-6" strokeWidth={2.4} />
+        <span className="hidden lg:inline text-[0.78rem] 2xl:text-[0.92rem] font-bold uppercase tracking-[0.14em]">
+          More
+        </span>
       </button>
     </div>
   );
