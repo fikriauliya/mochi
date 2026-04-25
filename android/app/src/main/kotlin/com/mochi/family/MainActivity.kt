@@ -1,7 +1,9 @@
 package com.mochi.family
 
+import android.Manifest
 import android.annotation.SuppressLint
 import android.content.SharedPreferences
+import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
 import android.view.KeyEvent
@@ -18,6 +20,8 @@ import android.widget.EditText
 import android.widget.LinearLayout
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 
 /**
  * Single-activity WebView shell. Loads whatever URL the user configured
@@ -31,6 +35,13 @@ class MainActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
     private lateinit var prefs: SharedPreferences
+
+    /**
+     * The most-recent WebView permission request that needs an OS-level
+     * runtime permission first. Resolved (granted or denied) inside
+     * `onRequestPermissionsResult`.
+     */
+    private var pendingPermissionRequest: PermissionRequest? = null
 
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -96,11 +107,7 @@ class MainActivity : AppCompatActivity() {
 
         webView.webChromeClient = object : WebChromeClient() {
             override fun onPermissionRequest(request: PermissionRequest) {
-                runOnUiThread {
-                    // Mochi only asks for mic, but we forward whatever the
-                    // page wants — same scope as a regular browser.
-                    request.grant(request.resources)
-                }
+                runOnUiThread { handleWebPermissionRequest(request) }
             }
         }
 
@@ -114,6 +121,59 @@ class MainActivity : AppCompatActivity() {
                     val msg = error?.description?.toString() ?: "Couldn't reach Mochi."
                     showSettingsDialog(initialFocus = true, errorMessage = msg)
                 }
+            }
+        }
+    }
+
+    /**
+     * Bridge between the WebView's permission API and Android's runtime
+     * permissions. The WebView itself will happily say "yes, mic is
+     * granted" via `request.grant`, but Android still won't actually
+     * deliver audio frames unless the OS-level RECORD_AUDIO is granted
+     * to the app. So:
+     *
+     *   1. If the page asks for audio capture and the OS permission
+     *      isn't held yet, stash the WebView request and ask the OS.
+     *   2. When the OS user grants/denies, resolve the stashed request.
+     *   3. If the page asks for something we don't need OS-mediation for
+     *      (e.g. midi), just grant.
+     */
+    private fun handleWebPermissionRequest(request: PermissionRequest) {
+        val needsAudio = request.resources.any {
+            it == PermissionRequest.RESOURCE_AUDIO_CAPTURE
+        }
+        if (needsAudio && !hasMicPermission()) {
+            pendingPermissionRequest = request
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.RECORD_AUDIO),
+                REQ_RECORD_AUDIO,
+            )
+            return
+        }
+        request.grant(request.resources)
+    }
+
+    private fun hasMicPermission(): Boolean =
+        ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray,
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQ_RECORD_AUDIO) {
+            val pending = pendingPermissionRequest
+            pendingPermissionRequest = null
+            if (pending == null) return
+            val granted = grantResults.isNotEmpty() &&
+                grantResults[0] == PackageManager.PERMISSION_GRANTED
+            if (granted) {
+                pending.grant(pending.resources)
+            } else {
+                pending.deny()
             }
         }
     }
@@ -200,5 +260,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val PREFS = "mochi"
         private const val KEY_URL = "server_url"
+        private const val REQ_RECORD_AUDIO = 1001
     }
 }
