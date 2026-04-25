@@ -14,16 +14,17 @@ export function EmptyState({ member, onPick }: Props) {
 
   return (
     <div className="flex-1 overflow-y-auto">
-      <div className="max-w-3xl mx-auto px-6 py-10">
-        {/* hero */}
-        <div className="flex items-center gap-6 mb-10 rise-in">
-          <Mochi size={132} happy />
+      <div className="max-w-3xl mx-auto px-4 sm:px-6 py-6 sm:py-10">
+        {/* hero — stacks on mobile, side-by-side on sm+ */}
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 sm:gap-6 mb-8 sm:mb-10 rise-in">
+          <Mochi size={96} happy className="sm:hidden" />
+          <Mochi size={132} happy className="hidden sm:inline-flex" />
           <div className="leading-tight">
-            <div className="text-[0.72rem] uppercase tracking-[0.18em] text-ink-faint mb-3">
+            <div className="text-[0.7rem] sm:text-[0.72rem] uppercase tracking-[0.18em] text-ink-faint mb-2 sm:mb-3">
               Today, {new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" })}
             </div>
             <h2
-              className="font-display text-[2.6rem] leading-[1.05] text-ink max-w-[28ch]"
+              className="font-display text-[1.7rem] sm:text-[2.1rem] lg:text-[2.6rem] leading-[1.08] text-ink max-w-[28ch]"
               style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
             >
               {greeting}
@@ -82,7 +83,7 @@ export function EmptyState({ member, onPick }: Props) {
           </div>
         </div>
 
-        <p className="text-center text-ink-faint text-sm italic mt-10 rise-in" style={{ animationDelay: "420ms" }}>
+        <p className="text-center text-ink-faint text-sm italic mt-6 sm:mt-10 rise-in" style={{ animationDelay: "420ms" }}>
           Or just type below — Mochi is listening 🌸
         </p>
       </div>

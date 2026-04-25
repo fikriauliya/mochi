@@ -26,9 +26,10 @@ export function MessageBubble({ message, member }: Props) {
 
   if (isMochi) {
     return (
-      <div className="bubble-in flex items-end gap-3 max-w-[42rem]">
-        <Mochi size={48} happy />
-        <div className="relative flex-1">
+      <div className="bubble-in flex items-end gap-2 sm:gap-3 max-w-[42rem]">
+        <Mochi size={40} happy className="sm:hidden shrink-0" />
+        <Mochi size={48} happy className="hidden sm:inline-flex shrink-0" />
+        <div className="relative flex-1 min-w-0">
           {/* tail */}
           <svg viewBox="0 0 12 12" className="absolute -left-1.5 bottom-2 w-3 h-3 text-paper">
             <path d="M12 0 L0 6 L12 12 Z" fill="currentColor" />
@@ -36,17 +37,17 @@ export function MessageBubble({ message, member }: Props) {
           <div
             className="
               relative bg-paper rounded-3xl rounded-bl-md
-              px-5 py-4
+              px-4 sm:px-5 py-3 sm:py-4
               border border-line
               shadow-[0_1px_0_var(--color-paper-shadow),0_14px_28px_-22px_rgba(42,36,33,0.45)]
               text-ink
             "
           >
-            <div className="text-[0.72rem] uppercase tracking-[0.18em] text-mochi-deep font-bold mb-1.5">
+            <div className="text-[0.7rem] sm:text-[0.72rem] uppercase tracking-[0.18em] text-mochi-deep font-bold mb-1 sm:mb-1.5">
               Mochi
             </div>
-            <p className="leading-relaxed whitespace-pre-wrap text-[1.02rem]">{message.text}</p>
-            <div className="text-[0.66rem] uppercase tracking-[0.16em] text-ink-faint mt-2">
+            <p className="leading-relaxed whitespace-pre-wrap text-[0.98rem] sm:text-[1.02rem]">{message.text}</p>
+            <div className="text-[0.65rem] sm:text-[0.66rem] uppercase tracking-[0.16em] text-ink-faint mt-1.5 sm:mt-2">
               {formatTime(message.ts)}
             </div>
           </div>
@@ -59,11 +60,11 @@ export function MessageBubble({ message, member }: Props) {
   const m = member;
 
   return (
-    <div className="bubble-in flex items-end gap-3 justify-end max-w-[42rem] ml-auto">
-      <div className="relative">
+    <div className="bubble-in flex items-end gap-2 sm:gap-3 justify-end max-w-[42rem] ml-auto">
+      <div className="relative min-w-0">
         <div
           className={cn(
-            "relative rounded-3xl rounded-br-md px-5 py-4",
+            "relative rounded-3xl rounded-br-md px-4 sm:px-5 py-3 sm:py-4",
             "border",
             "shadow-[0_1px_0_var(--color-paper-shadow),0_14px_28px_-22px_rgba(42,36,33,0.35)]",
             {
@@ -74,11 +75,11 @@ export function MessageBubble({ message, member }: Props) {
             },
           )}
         >
-          <div className={cn("text-[0.72rem] uppercase tracking-[0.18em] font-bold mb-1.5", m.classes.text)}>
+          <div className={cn("text-[0.7rem] sm:text-[0.72rem] uppercase tracking-[0.18em] font-bold mb-1 sm:mb-1.5", m.classes.text)}>
             {m.name}
           </div>
-          <p className="leading-relaxed whitespace-pre-wrap text-[1.02rem]">{message.text}</p>
-          <div className="text-[0.66rem] uppercase tracking-[0.16em] mt-2 opacity-60">
+          <p className="leading-relaxed whitespace-pre-wrap text-[0.98rem] sm:text-[1.02rem]">{message.text}</p>
+          <div className="text-[0.65rem] sm:text-[0.66rem] uppercase tracking-[0.16em] mt-1.5 sm:mt-2 opacity-60">
             {formatTime(message.ts)}
           </div>
         </div>
@@ -97,7 +98,8 @@ export function MessageBubble({ message, member }: Props) {
           <path d="M0 0 L12 6 L0 12 Z" fill="currentColor" />
         </svg>
       </div>
-      <FamilyAvatar id={m.id} size={48} />
+      <FamilyAvatar id={m.id} size={40} className="sm:hidden" />
+      <FamilyAvatar id={m.id} size={48} className="hidden sm:inline-flex" />
     </div>
   );
 }

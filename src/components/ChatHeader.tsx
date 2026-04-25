@@ -1,53 +1,74 @@
 import { FamilyAvatar } from "./FamilyAvatar";
 import { Mochi } from "./Mochi";
 import type { FamilyMember } from "@/lib/family";
-import { Sparkles, RefreshCcw } from "lucide-react";
+import { Sparkles, RefreshCcw, Menu } from "lucide-react";
 
 type Props = {
   member: FamilyMember;
   onClear: () => void;
   hasMessages: boolean;
+  onOpenRail: () => void;
 };
 
-export function ChatHeader({ member, onClear, hasMessages }: Props) {
+export function ChatHeader({ member, onClear, hasMessages, onOpenRail }: Props) {
   return (
-    <header className="
-      relative flex items-center justify-between
-      px-8 py-5
-      border-b border-line
-      bg-cream/60 backdrop-blur-sm
-      rise-in
-    ">
-      <div className="flex items-center gap-4">
-        <div className="relative">
-          <Mochi size={44} happy />
+    <header
+      className="
+        relative flex items-center justify-between gap-3
+        px-4 sm:px-6 lg:px-8 py-4 lg:py-5
+        border-b border-line
+        bg-cream/60 backdrop-blur-sm
+        rise-in
+      "
+      style={{ paddingTop: "max(env(safe-area-inset-top), 1rem)" }}
+    >
+      <div className="flex items-center gap-3 sm:gap-4 min-w-0">
+        {/* Mobile drawer trigger */}
+        <button
+          onClick={onOpenRail}
+          className="
+            md:hidden inline-flex items-center justify-center
+            size-10 -ml-1 rounded-full
+            text-ink-soft hover:bg-cream-deep
+            shrink-0
+          "
+          aria-label="Open menu"
+        >
+          <Menu className="size-5" />
+        </button>
+
+        <div className="relative shrink-0">
+          <Mochi size={40} happy />
           <span
             className="
               absolute -bottom-0 -right-0
-              size-3.5 rounded-full bg-mom
+              size-3 rounded-full bg-mom
               ring-2 ring-cream
               shadow-[0_0_0_1px_rgba(42,36,33,0.18)]
             "
             aria-label="Mochi is here"
           />
         </div>
-        <div className="leading-tight">
-          <div className="flex items-center gap-2 text-[0.72rem] uppercase tracking-[0.18em] text-ink-faint">
+
+        <div className="leading-tight min-w-0">
+          <div className="hidden sm:flex items-center gap-2 text-[0.7rem] uppercase tracking-[0.18em] text-ink-faint">
             <Sparkles className="size-3 text-mochi-deep" /> in the kitchen with
           </div>
           <h1
-            className="font-display text-2xl text-ink"
+            className="font-display text-[1.25rem] sm:text-2xl text-ink truncate"
             style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
           >
             {member.name}{" "}
-            <span className="text-ink-faint italic font-normal text-xl">·</span>{" "}
-            <span className="italic text-ink-soft text-xl">{member.role}</span>
+            <span className="hidden sm:inline text-ink-faint italic font-normal text-xl">·</span>{" "}
+            <span className="hidden sm:inline italic text-ink-soft text-xl">{member.role}</span>
           </h1>
         </div>
       </div>
 
-      <div className="flex items-center gap-3">
-        <FamilyAvatar id={member.id} size={42} />
+      <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+        <span className="hidden sm:block">
+          <FamilyAvatar id={member.id} size={42} />
+        </span>
         {hasMessages && (
           <button
             onClick={onClear}
@@ -59,9 +80,10 @@ export function ChatHeader({ member, onClear, hasMessages }: Props) {
               bg-paper hover:bg-cream-deep
               transition-colors
             "
+            aria-label="Start over"
           >
             <RefreshCcw className="size-3.5" />
-            Start over
+            <span className="hidden sm:inline">Start over</span>
           </button>
         )}
       </div>

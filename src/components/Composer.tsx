@@ -31,13 +31,16 @@ export function Composer({ member, onSend, disabled }: Props) {
   };
 
   return (
-    <div className="px-6 pb-6 pt-3 bg-cream/0">
+    <div
+      className="px-3 sm:px-6 pt-3 bg-cream/0"
+      style={{ paddingBottom: "max(env(safe-area-inset-bottom), 1rem)" }}
+    >
       <div
         className={cn(
           "max-w-3xl mx-auto",
-          "rounded-[28px] bg-paper border border-line",
+          "rounded-[24px] sm:rounded-[28px] bg-paper border border-line",
           "shadow-[0_1px_0_var(--color-paper-shadow),0_28px_50px_-32px_rgba(42,36,33,0.4)]",
-          "px-3 pt-3 pb-2",
+          "px-2.5 sm:px-3 pt-2.5 sm:pt-3 pb-2",
           "focus-within:border-line-strong focus-within:ring-4 focus-within:ring-mochi-soft",
           "transition-all",
         )}
@@ -97,11 +100,11 @@ export function Composer({ member, onSend, disabled }: Props) {
           </button>
         </div>
 
-        <div className="flex items-center gap-2 pt-2 pl-12 pr-1">
+        <div className="flex items-center gap-1.5 sm:gap-2 pt-2 pl-1 sm:pl-12 pr-1 overflow-x-auto">
           <ComposerChip icon={Mic} label="Voice" />
           <ComposerChip icon={Camera} label="Photo" />
           <ComposerChip icon={Pencil} label="Drawing" />
-          <span className="ml-auto text-[0.7rem] text-ink-faint italic">
+          <span className="ml-auto hidden md:inline text-[0.7rem] text-ink-faint italic shrink-0">
             Press <kbd className="px-1.5 py-0.5 rounded bg-cream-deep border border-line text-ink-soft text-[0.65rem]">Enter</kbd> to send
           </span>
         </div>

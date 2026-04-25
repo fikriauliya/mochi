@@ -7,7 +7,20 @@
   }
 
   body {
-    @apply min-w-[320px] min-h-screen relative m-0 bg-background text-foreground overflow-hidden;
+    @apply min-w-[320px] relative m-0 bg-background text-foreground overflow-hidden;
+    /* Use dynamic viewport so iOS Safari's URL bar shrink/grow doesn't
+       leave a gap at the bottom of the chat surface. */
+    height: 100dvh;
+  }
+
+  /* Prevent iOS form-field auto-zoom by ensuring 16px minimum. */
+  input, textarea, select {
+    font-size: 16px;
+  }
+  @media (min-width: 640px) {
+    input, textarea, select {
+      font-size: inherit;
+    }
   }
 
   /* Paper texture: tiny graph-paper dots + a soft grain overlay.
