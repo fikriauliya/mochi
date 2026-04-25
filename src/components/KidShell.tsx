@@ -117,9 +117,11 @@ function LangChip({
       onClick={() => setLang(lang === "id-ID" ? "en-US" : "id-ID")}
       title="Speech language"
       className={cn(
-        "px-3 py-1.5 rounded-full text-[0.7rem] font-bold uppercase tracking-[0.18em]",
+        "px-3 py-1.5 2xl:px-4 2xl:py-2 rounded-full font-bold uppercase tracking-[0.18em]",
+        "text-[0.7rem] 2xl:text-[0.85rem]",
         "bg-paper border border-line text-ink-soft",
         "hover:bg-cream-deep transition-colors",
+        "focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft",
         className,
       )}
     >
@@ -151,86 +153,100 @@ function KidHome(props: {
 
   return (
     <div className="h-dvh w-screen bg-cream flex flex-col overflow-hidden">
-      <div className="absolute top-3 right-3 z-30 flex items-center gap-2">
+      <div
+        className="absolute right-3 z-30 flex items-center gap-2"
+        style={{ top: "max(0.75rem, env(safe-area-inset-top))" }}
+      >
         <LangChip lang={lang} setLang={setLang} />
       </div>
 
-      <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
-        <button
-          onClick={() => setComposer({ kind: "voice", intent: "create" })}
-          aria-label="Tap to talk"
-          className="
-            relative inline-flex items-center justify-center
-            size-44 sm:size-52 lg:size-60 rounded-full
-            bg-mochi-deep text-paper
-            shadow-[0_18px_40px_-12px_rgba(224,114,107,0.7)]
-            hover:scale-[1.04] active:scale-95 transition-transform
-            focus:outline-none focus:ring-8 focus:ring-mochi-soft
-          "
-        >
-          <span className="absolute inset-0 rounded-full bg-mochi-deep mic-halo" />
-          <Mic className="size-20 sm:size-24 lg:size-28 relative" strokeWidth={2} />
-        </button>
-        <p
-          className="font-display text-2xl sm:text-3xl lg:text-4xl text-ink-soft italic text-center"
-          style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
-        >
-          Tap &amp; talk
-        </p>
-
-        {/* Suggestion chips */}
-        <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-2xl">
-          <span className="text-[0.7rem] uppercase tracking-[0.18em] text-ink-faint mr-1">
-            try
-          </span>
-          {SUGGESTIONS.map((s) => (
-            <button
-              key={s}
-              onClick={() => onCreate(s)}
-              className="
-                px-3 py-1.5 rounded-full text-[0.78rem] italic
-                bg-paper border border-line/70 text-ink-soft
-                hover:bg-cream-deep transition-colors
-              "
-            >
-              {s}
-            </button>
-          ))}
-        </div>
-
-        {/* Type-instead fallback for adults / when voice isn't an option */}
-        <button
-          onClick={() => setComposer({ kind: "text", intent: "create" })}
-          className="
-            inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full
-            text-[0.78rem] text-ink-soft hover:text-ink hover:bg-cream-deep
-            transition-colors
-          "
-        >
-          <Keyboard className="size-3.5" /> or type instead
-        </button>
-      </div>
-
-      <div className="px-4 pb-6 sm:pb-8">
-        <h2 className="text-[0.78rem] uppercase tracking-[0.22em] text-ink-faint text-center mb-3">
-          Your stuff
-        </h2>
-        {sorted.length === 0 ? (
-          <p className="text-center text-ink-faint italic">
-            No apps yet — tap the mic to make one!
+      <div className="flex-1 overflow-y-auto">
+       <div className="min-h-full flex flex-col">
+        <div className="flex-1 flex flex-col items-center justify-center gap-5 sm:gap-6 px-6 py-10">
+          <button
+            onClick={() => setComposer({ kind: "voice", intent: "create" })}
+            aria-label="Tap to talk"
+            autoFocus
+            className="
+              relative inline-flex items-center justify-center
+              size-40 sm:size-52 lg:size-60 2xl:size-72 rounded-full
+              bg-mochi-deep text-paper
+              shadow-[0_18px_40px_-12px_rgba(224,114,107,0.7)]
+              hover:scale-[1.04] active:scale-95 transition-transform
+              focus:outline-none focus-visible:ring-8 focus-visible:ring-mochi-soft
+            "
+          >
+            <span className="absolute inset-0 rounded-full bg-mochi-deep mic-halo" />
+            <Mic
+              className="size-20 sm:size-24 lg:size-28 2xl:size-36 relative"
+              strokeWidth={2}
+            />
+          </button>
+          <p
+            className="font-display text-2xl sm:text-3xl lg:text-4xl 2xl:text-5xl text-ink-soft italic text-center"
+            style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
+          >
+            Tap &amp; talk
           </p>
-        ) : (
-          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 max-w-5xl mx-auto">
-            {sorted.slice(0, 12).map((app) => (
-              <KidAppTile
-                key={app.id}
-                app={app}
-                onOpen={onOpenApp}
-                onMenu={() => setMenuApp(app)}
-              />
+
+          {/* Suggestion chips */}
+          <div className="flex flex-wrap items-center justify-center gap-1.5 2xl:gap-2 max-w-2xl">
+            <span className="text-[0.7rem] 2xl:text-[0.85rem] uppercase tracking-[0.18em] text-ink-faint mr-1">
+              try
+            </span>
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                onClick={() => onCreate(s)}
+                className="
+                  px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full italic
+                  text-[0.78rem] 2xl:text-base
+                  bg-paper border border-line/70 text-ink-soft
+                  hover:bg-cream-deep transition-colors
+                  focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+                "
+              >
+                {s}
+              </button>
             ))}
           </div>
-        )}
+
+          {/* Type-instead fallback for adults / when voice isn't an option */}
+          <button
+            onClick={() => setComposer({ kind: "text", intent: "create" })}
+            className="
+              inline-flex items-center gap-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full
+              text-[0.78rem] 2xl:text-base text-ink-soft hover:text-ink hover:bg-cream-deep
+              transition-colors
+              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+            "
+          >
+            <Keyboard className="size-3.5 2xl:size-4" /> or type instead
+          </button>
+        </div>
+
+        <div className="px-4 pb-6 sm:pb-8">
+          <h2 className="text-[0.78rem] 2xl:text-[0.92rem] uppercase tracking-[0.22em] text-ink-faint text-center mb-3 2xl:mb-5">
+            Your stuff
+          </h2>
+          {sorted.length === 0 ? (
+            <p className="text-center text-ink-faint italic 2xl:text-lg">
+              No apps yet — tap the mic to make one!
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 2xl:gap-4 max-w-5xl 2xl:max-w-6xl mx-auto">
+              {sorted.slice(0, 12).map((app) => (
+                <KidAppTile
+                  key={app.id}
+                  app={app}
+                  onOpen={onOpenApp}
+                  onMenu={() => setMenuApp(app)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+       </div>
       </div>
 
       {composer.kind === "voice" && (
@@ -331,12 +347,12 @@ function KidAppTile({
           "absolute inset-0 rounded-3xl p-3",
           "flex flex-col items-center justify-center gap-2",
           isReady ? "cursor-pointer" : "cursor-help",
-          "focus:outline-none focus:ring-4 focus:ring-mochi-soft",
+          "focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft",
         )}
       >
         <span
           className={cn(
-            "text-5xl sm:text-6xl",
+            "text-5xl sm:text-6xl 2xl:text-7xl",
             !isReady && "grayscale opacity-60",
           )}
           aria-hidden
@@ -344,7 +360,7 @@ function KidAppTile({
           {app.emoji || "✨"}
         </span>
         <span
-          className="font-display text-[0.95rem] sm:text-base text-ink line-clamp-2 text-center leading-tight px-2"
+          className="font-display text-[0.95rem] sm:text-base 2xl:text-lg text-ink line-clamp-2 text-center leading-tight px-2"
           style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
         >
           {app.name}
@@ -374,15 +390,15 @@ function KidAppTile({
         aria-label="More"
         title="More"
         className="
-          absolute top-1.5 right-1.5 size-8 rounded-full
+          absolute top-1.5 right-1.5 size-9 2xl:size-11 rounded-full
           flex items-center justify-center
           bg-paper/80 border border-line text-ink-soft
           hover:bg-cream-deep transition-colors
           opacity-90 hover:opacity-100
-          focus:outline-none focus:ring-2 focus:ring-mochi-soft
+          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
         "
       >
-        <MoreHorizontal className="size-4" />
+        <MoreHorizontal className="size-4 2xl:size-5" />
       </button>
     </div>
   );
@@ -428,7 +444,7 @@ function KidAppMenu(props: {
         <button
           onClick={onClose}
           aria-label="Close"
-          className="absolute top-3 right-3 size-10 rounded-full hover:bg-cream-deep flex items-center justify-center text-ink-soft"
+          className="absolute top-3 right-3 size-10 rounded-full hover:bg-cream-deep flex items-center justify-center text-ink-soft focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft"
         >
           <X className="size-5" />
         </button>
@@ -467,15 +483,18 @@ function KidAppMenu(props: {
                   flex-1 inline-flex items-center justify-center gap-2
                   rounded-2xl px-4 py-3 font-semibold text-paper bg-mom
                   hover:scale-[1.02] active:scale-95 transition-transform
+                  focus:outline-none focus-visible:ring-4 focus-visible:ring-mom-soft
                 "
               >
                 <Trash2 className="size-4" /> Delete
               </button>
               <button
                 onClick={() => setConfirmDelete(false)}
+                autoFocus
                 className="
                   flex-1 inline-flex items-center justify-center
                   rounded-2xl px-4 py-3 bg-cream-deep border border-line text-ink
+                  focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
                 "
               >
                 Keep
@@ -487,12 +506,14 @@ function KidAppMenu(props: {
             <button
               onClick={() => onOpen(app.id)}
               disabled={!isReady}
+              autoFocus
               className="
                 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
                 bg-mochi-deep text-paper font-semibold
                 shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
                 hover:scale-[1.02] active:scale-95 transition-transform
                 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
               "
             >
               Open
@@ -505,6 +526,7 @@ function KidAppMenu(props: {
                 bg-cream-deep border border-line text-ink
                 hover:bg-paper-shadow transition-colors
                 disabled:opacity-40 disabled:cursor-not-allowed
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
               "
             >
               <Pencil className="size-4" /> Modify
@@ -517,6 +539,7 @@ function KidAppMenu(props: {
                 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
                 bg-cream-deep border border-line text-ink
                 hover:bg-paper-shadow transition-colors
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
               "
             >
               <ExternalLink className="size-4" /> Open in tab
@@ -527,6 +550,7 @@ function KidAppMenu(props: {
                 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
                 bg-mom-soft border border-mom/30 text-mom-ink
                 hover:bg-mom-soft/80 transition-colors
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
               "
             >
               <Trash2 className="size-4" /> Delete
@@ -593,14 +617,14 @@ function KidMicOverlay({
 
       <Mochi typing size={200} />
       <h2
-        className="font-display text-3xl sm:text-5xl lg:text-6xl text-ink mt-8 text-center max-w-3xl leading-tight"
+        className="font-display text-3xl sm:text-5xl lg:text-6xl 2xl:text-7xl text-ink mt-8 text-center max-w-3xl 2xl:max-w-4xl leading-tight"
         style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
       >
         {promptText}
       </h2>
 
       {speech.state === "denied" && (
-        <p className="text-mom italic mt-6">
+        <p className="text-mom italic mt-6 text-base 2xl:text-lg">
           Mic blocked — ask a grown-up for help.
         </p>
       )}
@@ -612,9 +636,10 @@ function KidMicOverlay({
             onSwitchToType(speech.transcript || undefined);
           }}
           className="
-            inline-flex items-center gap-2 px-4 py-3 rounded-full
+            inline-flex items-center gap-2 px-4 py-3 2xl:px-5 2xl:py-3.5 rounded-full
             bg-paper border border-line text-ink-soft hover:bg-cream-deep
-            transition-colors text-[0.88rem]
+            transition-colors text-[0.88rem] 2xl:text-base
+            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
           "
         >
           <Keyboard className="size-4" /> Type instead
@@ -623,8 +648,9 @@ function KidMicOverlay({
           onClick={onClose}
           className="
             inline-flex items-center justify-center
-            size-12 rounded-full bg-paper border border-line text-ink-soft
+            size-12 2xl:size-14 rounded-full bg-paper border border-line text-ink-soft
             hover:bg-cream-deep transition-colors
+            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
           "
           aria-label="Cancel"
         >
@@ -690,27 +716,27 @@ function KidTypeOverlay({
       />
       <div
         className={cn(
-          "relative w-full max-w-xl rounded-3xl bg-paper border border-line",
+          "relative w-full max-w-xl 2xl:max-w-3xl rounded-3xl bg-paper border border-line",
           "shadow-[0_24px_60px_-20px_rgba(42,36,33,0.5)]",
-          "p-5 sm:p-6",
+          "p-5 sm:p-6 2xl:p-8",
         )}
       >
         <button
           onClick={onClose}
           aria-label="Close"
-          className="absolute top-3 right-3 size-10 rounded-full hover:bg-cream-deep flex items-center justify-center text-ink-soft"
+          className="absolute top-3 right-3 size-10 rounded-full hover:bg-cream-deep flex items-center justify-center text-ink-soft focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft"
         >
           <X className="size-5" />
         </button>
 
         <h3
-          className="font-display text-2xl text-ink leading-tight pr-10"
+          className="font-display text-2xl 2xl:text-3xl text-ink leading-tight pr-10"
           style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
         >
           {title}
         </h3>
         {intent === "modify" && target && (
-          <p className="text-[0.85rem] text-ink-faint italic mt-1">
+          <p className="text-[0.85rem] 2xl:text-base text-ink-faint italic mt-1">
             {target.description}
           </p>
         )}
@@ -729,9 +755,9 @@ function KidTypeOverlay({
           placeholder={placeholder}
           className="
             mt-4 w-full rounded-2xl border border-line bg-cream-deep/40
-            px-4 py-3 text-[1rem] text-ink
+            px-4 py-3 text-[1rem] 2xl:text-lg text-ink
             placeholder:text-ink-faint placeholder:italic
-            focus:outline-none focus:ring-4 focus:ring-mochi-soft focus:border-line-strong
+            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft focus:border-line-strong
             resize-y min-h-[6rem] max-h-[16rem]
           "
         />
@@ -741,11 +767,12 @@ function KidTypeOverlay({
             onClick={submit}
             disabled={!value.trim()}
             className="
-              flex-1 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
-              bg-mochi-deep text-paper font-semibold
+              flex-1 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 2xl:py-4
+              bg-mochi-deep text-paper font-semibold 2xl:text-lg
               shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
               hover:scale-[1.02] active:scale-95 transition-transform
               disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100
+              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
             "
           >
             <Sparkles className="size-4" />
@@ -754,14 +781,15 @@ function KidTypeOverlay({
           <button
             onClick={onClose}
             className="
-              inline-flex items-center justify-center rounded-2xl px-4 py-3
-              bg-cream-deep border border-line text-ink
+              inline-flex items-center justify-center rounded-2xl px-4 py-3 2xl:py-4
+              bg-cream-deep border border-line text-ink 2xl:text-lg
+              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
             "
           >
             Cancel
           </button>
         </div>
-        <p className="text-[0.7rem] text-ink-faint italic mt-2 text-center">
+        <p className="text-[0.7rem] 2xl:text-[0.82rem] text-ink-faint italic mt-2 text-center">
           ⌘ / Ctrl + Enter to send
         </p>
       </div>
@@ -842,10 +870,12 @@ function KidBuildView({
       <button
         onClick={onBack}
         className="
-          absolute top-3 left-3 z-20
-          inline-flex items-center gap-1.5 text-[0.82rem] text-ink-soft hover:text-ink
+          absolute left-3 z-20
+          inline-flex items-center gap-1.5 text-[0.82rem] 2xl:text-base text-ink-soft hover:text-ink
           px-3 py-2 rounded-full hover:bg-cream-deep
+          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
         "
+        style={{ top: "max(0.75rem, env(safe-area-inset-top))" }}
       >
         <ArrowLeft className="size-4" /> Home
       </button>
@@ -853,7 +883,7 @@ function KidBuildView({
       <Mochi typing={phase === "cooking"} happy={phase === "done"} size={200} />
       <h2
         className={cn(
-          "font-display text-3xl sm:text-5xl lg:text-6xl text-center leading-tight max-w-3xl",
+          "font-display text-3xl sm:text-5xl lg:text-6xl 2xl:text-7xl text-center leading-tight max-w-3xl 2xl:max-w-5xl",
           phase === "error" ? "text-mom" : "text-ink",
         )}
         style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
@@ -862,20 +892,22 @@ function KidBuildView({
       </h2>
 
       {phase === "error" && (
-        <div className="w-full max-w-xl rounded-3xl border border-mom/30 bg-mom-soft/40 p-5">
+        <div className="w-full max-w-xl 2xl:max-w-2xl rounded-3xl border border-mom/30 bg-mom-soft/40 p-5">
           {errorMessage && (
-            <p className="text-[0.88rem] text-ink-soft whitespace-pre-wrap mb-4">
+            <p className="text-[0.88rem] 2xl:text-base text-ink-soft whitespace-pre-wrap mb-4">
               {errorMessage}
             </p>
           )}
           <div className="flex gap-2">
             <button
               onClick={tryAgain}
+              autoFocus
               className="
-                flex-1 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
-                bg-mochi-deep text-paper font-semibold
+                flex-1 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 2xl:py-4
+                bg-mochi-deep text-paper font-semibold 2xl:text-lg
                 shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
                 hover:scale-[1.02] active:scale-95 transition-transform
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
               "
             >
               <RefreshCcw className="size-4" />
@@ -884,8 +916,9 @@ function KidBuildView({
             <button
               onClick={onBack}
               className="
-                inline-flex items-center justify-center rounded-2xl px-4 py-3
-                bg-cream-deep border border-line text-ink
+                inline-flex items-center justify-center rounded-2xl px-4 py-3 2xl:py-4
+                bg-cream-deep border border-line text-ink 2xl:text-lg
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
               "
             >
               Home
@@ -895,12 +928,13 @@ function KidBuildView({
       )}
 
       {/* Watch Mochi work */}
-      <div className="w-full max-w-xl">
+      <div className="w-full max-w-xl 2xl:max-w-2xl">
         <button
           onClick={() => setShowLog((v) => !v)}
           className="
             w-full inline-flex items-center justify-center gap-1.5
-            text-[0.78rem] uppercase tracking-[0.16em] text-ink-soft hover:text-ink
+            text-[0.78rem] 2xl:text-[0.92rem] uppercase tracking-[0.16em] text-ink-soft hover:text-ink
+            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft rounded-full py-1
           "
         >
           {showLog ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
@@ -922,27 +956,31 @@ function KidOpenView({ app, onBack }: { app: App; onBack: () => void }) {
   const [iframeKey, setIframeKey] = React.useState(0);
   return (
     <div className="h-dvh w-screen flex flex-col bg-white">
-      <div className="shrink-0 flex items-center justify-between gap-3 px-3 py-2 border-b border-line bg-cream/80 backdrop-blur-sm">
+      <div
+        className="shrink-0 flex items-center justify-between gap-3 px-3 py-2 border-b border-line bg-cream/80 backdrop-blur-sm"
+        style={{ paddingTop: "max(0.5rem, env(safe-area-inset-top))" }}
+      >
         <button
           onClick={onBack}
           aria-label="Back"
+          autoFocus
           className="
-            size-14 rounded-full
+            size-14 2xl:size-16 rounded-full
             bg-mochi-deep text-paper
             flex items-center justify-center
             shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
             hover:scale-[1.04] active:scale-95 transition-transform
-            focus:outline-none focus:ring-4 focus:ring-mochi-soft
+            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
           "
         >
-          <ArrowLeft className="size-7" strokeWidth={2.4} />
+          <ArrowLeft className="size-7 2xl:size-8" strokeWidth={2.4} />
         </button>
 
         <h2
-          className="font-display text-xl sm:text-2xl text-ink flex items-center gap-2 truncate min-w-0"
+          className="font-display text-xl sm:text-2xl 2xl:text-3xl text-ink flex items-center gap-2 truncate min-w-0"
           style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
         >
-          <span className="text-2xl shrink-0" aria-hidden>
+          <span className="text-2xl 2xl:text-3xl shrink-0" aria-hidden>
             {app.emoji}
           </span>
           <span className="truncate">{app.name}</span>
@@ -953,13 +991,14 @@ function KidOpenView({ app, onBack }: { app: App; onBack: () => void }) {
           target="_blank"
           rel="noopener noreferrer"
           className="
-            shrink-0 size-11 inline-flex items-center justify-center rounded-full
+            shrink-0 size-11 2xl:size-12 inline-flex items-center justify-center rounded-full
             bg-paper border border-line text-ink-soft hover:bg-cream-deep
+            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
           "
           aria-label="Open in tab"
           title="Open in tab"
         >
-          <ExternalLink className="size-4" />
+          <ExternalLink className="size-4 2xl:size-5" />
         </a>
       </div>
 
