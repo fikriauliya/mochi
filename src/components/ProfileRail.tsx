@@ -1,8 +1,9 @@
 import { FamilyAvatar } from "./FamilyAvatar";
-import { FAMILY_LIST, type FamilyMember } from "@/lib/family";
+import { FAMILY, FAMILY_LIST, type FamilyMember } from "@/lib/family";
 import { cn } from "@/lib/utils";
 import { Mochi } from "./Mochi";
 import { X } from "lucide-react";
+import type { App } from "@/lib/types";
 
 type Props = {
   active: FamilyMember["id"];
@@ -11,14 +12,10 @@ type Props = {
   /** Drawer state (only consulted below md). */
   mobileOpen: boolean;
   onMobileClose: () => void;
+  /** All apps in the shared family library. */
+  apps: App[];
+  onOpenApp: (id: string) => void;
 };
-
-const SAMPLE_HISTORY = [
-  { id: "h1", who: "Aira", title: "How tall is the moon?", when: "Today" },
-  { id: "h2", who: "Mom", title: "Tuesday meal plan", when: "Today" },
-  { id: "h3", who: "Kenji", title: "Why do worms love rain", when: "Yesterday" },
-  { id: "h4", who: "Dad", title: "Camping packlist", when: "Sun" },
-];
 
 export function ProfileRail({
   active,
@@ -26,10 +23,20 @@ export function ProfileRail({
   onNewChat,
   mobileOpen,
   onMobileClose,
+  apps,
+  onOpenApp,
 }: Props) {
   // Close drawer on mobile after picking someone.
   const pick = (id: FamilyMember["id"]) => {
     onSelect(id);
+    onMobileClose();
+  };
+
+  // Newest 8 apps for the rail
+  const recent = [...apps].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 8);
+
+  const openAndClose = (id: string) => {
+    onOpenApp(id);
     onMobileClose();
   };
 
@@ -156,36 +163,68 @@ export function ProfileRail({
         </svg>
       </div>
 
-      {/* today's chats */}
+      {/* family apps */}
       <div className="px-6 pt-2 pb-4 flex-1 overflow-y-auto rise-in" style={{ animationDelay: "200ms" }}>
-        <div className="text-[0.72rem] uppercase tracking-[0.18em] text-ink-faint mb-3">
-          Today's chats
+        <div className="flex items-baseline justify-between mb-3">
+          <div className="text-[0.72rem] uppercase tracking-[0.18em] text-ink-faint">
+            Family apps
+          </div>
+          {apps.length > 0 && (
+            <span className="text-[0.7rem] text-ink-faint italic">{apps.length}</span>
+          )}
         </div>
-        <ul className="space-y-1.5">
-          {SAMPLE_HISTORY.map((h) => (
-            <li key={h.id}>
-              <button
-                className="
-                  w-full text-left px-3 py-2 rounded-xl
-                  hover:bg-paper transition-colors
-                "
-              >
-                <div className="text-[0.9rem] text-ink truncate">{h.title}</div>
-                <div className="text-[0.72rem] text-ink-faint flex items-center gap-2">
-                  <span className="text-ink-soft">{h.who}</span>
-                  <span className="opacity-60">·</span>
-                  <span>{h.when}</span>
-                </div>
-              </button>
-            </li>
-          ))}
-        </ul>
+        {recent.length === 0 ? (
+          <div className="text-[0.78rem] text-ink-faint italic px-3 py-2">
+            No apps yet — ask Mochi to build one.
+          </div>
+        ) : (
+          <ul className="space-y-1.5">
+            {recent.map((app) => {
+              const owner = FAMILY[app.ownerId];
+              return (
+                <li key={app.id}>
+                  <button
+                    onClick={() => openAndClose(app.id)}
+                    disabled={app.status !== "ready"}
+                    className={cn(
+                      "w-full text-left px-3 py-2 rounded-xl flex items-center gap-2.5",
+                      "hover:bg-paper transition-colors",
+                      "disabled:opacity-60 disabled:cursor-not-allowed",
+                    )}
+                  >
+                    <span className="text-xl shrink-0" aria-hidden>
+                      {app.emoji || "✨"}
+                    </span>
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[0.9rem] text-ink truncate">{app.name}</span>
+                      <span className="block text-[0.7rem] text-ink-faint flex items-center gap-1.5">
+                        <span className={cn("inline-block size-2 rounded-full", {
+                          "bg-dad": owner.id === "dad",
+                          "bg-mom": owner.id === "mom",
+                          "bg-aira": owner.id === "aira",
+                          "bg-kenji": owner.id === "kenji",
+                        })} />
+                        <span>{owner.name}</span>
+                        {app.status === "building" && (
+                          <span className="italic text-mochi-deep">· cooking</span>
+                        )}
+                        {app.status === "error" && (
+                          <span className="italic text-mom">· stuck</span>
+                        )}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
 
       {/* footer */}
       <div className="px-6 py-4 border-t border-line text-[0.72rem] text-ink-faint leading-relaxed rise-in"
         style={{ animationDelay: "260ms" }}>
-        Mochi is a soft, friendly helper. Grown-ups stay in charge — please review what Mochi suggests, especially recipes and homework.
+        Mochi builds tiny apps for the family. A grown-up should glance at every new app — Mochi is helpful but not perfect.
       </div>
       </aside>
     </>

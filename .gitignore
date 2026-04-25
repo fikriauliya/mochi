@@ -36,3 +36,7 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 # Playwright/dev screenshot artifacts
 .playwright-mcp/
 mochi-*.png
+
+# Generated apps (keep .gitkeep)
+apps/*
+!apps/.gitkeep

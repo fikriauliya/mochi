@@ -52,7 +52,7 @@ export function ChatHeader({ member, onClear, hasMessages, onOpenRail }: Props) 
 
         <div className="leading-tight min-w-0">
           <div className="hidden sm:flex items-center gap-2 text-[0.7rem] uppercase tracking-[0.18em] text-ink-faint">
-            <Sparkles className="size-3 text-mochi-deep" /> in the kitchen with
+            <Sparkles className="size-3 text-mochi-deep" /> building as
           </div>
           <h1
             className="font-display text-[1.25rem] sm:text-2xl text-ink truncate"

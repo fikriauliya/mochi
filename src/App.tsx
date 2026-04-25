@@ -1,27 +1,60 @@
 import * as React from "react";
 import { ProfileRail } from "./components/ProfileRail";
 import { ChatHeader } from "./components/ChatHeader";
-import { EmptyState } from "./components/EmptyState";
-import { Composer } from "./components/Composer";
-import { MessageBubble, type Message } from "./components/MessageBubble";
-import { TypingBubble } from "./components/TypingBubble";
+import { AppLibrary } from "./components/AppLibrary";
+import { BuildView } from "./components/BuildView";
+import { OpenView } from "./components/OpenView";
 import { FAMILY, type FamilyId } from "./lib/family";
-import { fakeTypingDelay, mochiReply } from "./lib/mockReplies";
+import { createApp, listApps, getApp, modifyApp } from "./lib/api";
+import type { App } from "./lib/types";
 import "./index.css";
 
-function makeId() {
-  return Math.random().toString(36).slice(2, 10);
+type View =
+  | { kind: "home" }
+  | { kind: "build"; appId: string }
+  | { kind: "open"; appId: string };
+
+function viewFromPath(pathname: string): View {
+  const m1 = pathname.match(/^\/build\/([^/]+)\/?$/);
+  if (m1 && m1[1]) return { kind: "build", appId: m1[1] };
+  const m2 = pathname.match(/^\/open\/([^/]+)\/?$/);
+  if (m2 && m2[1]) return { kind: "open", appId: m2[1] };
+  return { kind: "home" };
+}
+
+function pathFromView(view: View): string {
+  if (view.kind === "home") return "/";
+  if (view.kind === "build") return `/build/${view.appId}`;
+  return `/open/${view.appId}`;
 }
 
 export function App() {
   const [activeId, setActiveId] = React.useState<FamilyId>("aira");
-  const [messages, setMessages] = React.useState<Message[]>([]);
-  const [typing, setTyping] = React.useState(false);
+  const [view, setView] = React.useState<View>(() =>
+    viewFromPath(window.location.pathname),
+  );
+  const [apps, setApps] = React.useState<App[]>([]);
+  const [appsLoading, setAppsLoading] = React.useState(true);
   const [railOpen, setRailOpen] = React.useState(false);
-  const scrollRef = React.useRef<HTMLDivElement>(null);
+
   const member = FAMILY[activeId];
 
-  // Close drawer on Escape, and when crossing the md breakpoint upward.
+  // Sync view with the URL on browser back/forward
+  React.useEffect(() => {
+    const onPop = () => setView(viewFromPath(window.location.pathname));
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  const navigate = React.useCallback((next: View) => {
+    const path = pathFromView(next);
+    if (window.location.pathname !== path) {
+      window.history.pushState(null, "", path);
+    }
+    setView(next);
+  }, []);
+
+  // Close drawer on Escape and when crossing the md breakpoint upward
   React.useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") setRailOpen(false);
@@ -36,92 +69,165 @@ export function App() {
     };
   }, []);
 
-  // Auto-scroll on new messages / typing change
+  // Load apps on mount + after each build/modify completion
+  const reload = React.useCallback(async () => {
+    try {
+      const next = await listApps();
+      setApps(next);
+    } catch {
+      // ignore — empty state will be shown
+    } finally {
+      setAppsLoading(false);
+    }
+  }, []);
+
   React.useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
-  }, [messages, typing]);
+    reload();
+  }, [reload]);
 
-  const reset = React.useCallback(() => {
-    setMessages([]);
-    setTyping(false);
-  }, []);
+  // Resolve the current app from the loaded list (or fetch if missing)
+  const [currentApp, setCurrentApp] = React.useState<App | null>(null);
+  React.useEffect(() => {
+    if (view.kind === "home") {
+      setCurrentApp(null);
+      return;
+    }
+    const fromList = apps.find((a) => a.id === view.appId);
+    if (fromList) {
+      setCurrentApp(fromList);
+      return;
+    }
+    let cancelled = false;
+    getApp(view.appId)
+      .then((a) => {
+        if (!cancelled) setCurrentApp(a);
+      })
+      .catch(() => {
+        if (!cancelled) navigate({ kind: "home" });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [view, apps, navigate]);
 
-  // Switching profile clears the local thread (keeps the demo simple).
-  const handleSelect = React.useCallback((id: FamilyId) => {
-    setActiveId(id);
-    setMessages([]);
-    setTyping(false);
-  }, []);
+  // ---- Actions ----
 
-  const send = React.useCallback(
-    (text: string) => {
-      const userMsg: Message = {
-        id: makeId(),
-        authorId: activeId,
-        text,
-        ts: Date.now(),
-      };
-      setMessages((prev) => [...prev, userMsg]);
-
-      const reply = mochiReply(text, FAMILY[activeId]);
-      setTyping(true);
-
-      const timeout = setTimeout(() => {
-        const replyMsg: Message = {
-          id: makeId(),
-          authorId: "mochi",
-          text: reply,
-          ts: Date.now(),
-        };
-        setMessages((prev) => [...prev, replyMsg]);
-        setTyping(false);
-      }, fakeTypingDelay(reply));
-
-      return () => clearTimeout(timeout);
+  const onCreate = React.useCallback(
+    async (prompt: string) => {
+      try {
+        const app = await createApp({ prompt, ownerId: activeId });
+        // optimistic insert; we'll reload after build completes
+        setApps((cur) => [app, ...cur.filter((a) => a.id !== app.id)]);
+        navigate({ kind: "build", appId: app.id });
+      } catch (e) {
+        // bubble up minimally for now; UI can show toast in v2
+        console.error("createApp failed", e);
+      }
     },
-    [activeId],
+    [activeId, navigate],
   );
 
-  const hasMessages = messages.length > 0 || typing;
+  const onSelectMember = React.useCallback((id: FamilyId) => {
+    setActiveId(id);
+    setRailOpen(false);
+    // Stay on current view — switching member just changes the composer color
+    // and the requesting attribution.
+  }, []);
+
+  const onOpenApp = React.useCallback(
+    (id: string) => navigate({ kind: "open", appId: id }),
+    [navigate],
+  );
+
+  const onModifyOpen = React.useCallback(
+    (id: string) => navigate({ kind: "open", appId: id }),
+    [navigate],
+  );
+
+  const onBuildDone = React.useCallback(
+    async (id: string) => {
+      await reload();
+      navigate({ kind: "open", appId: id });
+    },
+    [navigate, reload],
+  );
+
+  const onRetryBuild = React.useCallback(async () => {
+    if (view.kind !== "build" || !currentApp) return;
+    try {
+      const app = await modifyApp(currentApp.id, {
+        prompt: currentApp.prompt,
+        ownerId: activeId,
+      });
+      setCurrentApp(app);
+      // Force the BuildView to reset by remounting
+      navigate({ kind: "home" });
+      setTimeout(() => navigate({ kind: "build", appId: app.id }), 50);
+    } catch (e) {
+      console.error("retry failed", e);
+    }
+  }, [view, currentApp, activeId, navigate]);
+
+  const onBackHome = React.useCallback(
+    () => navigate({ kind: "home" }),
+    [navigate],
+  );
+
+  // ---- Render ----
 
   return (
     <div className="h-dvh w-screen flex overflow-hidden">
       <ProfileRail
         active={activeId}
-        onSelect={handleSelect}
-        onNewChat={reset}
+        onSelect={onSelectMember}
+        onNewChat={onBackHome}
         mobileOpen={railOpen}
         onMobileClose={() => setRailOpen(false)}
+        apps={apps}
+        onOpenApp={onOpenApp}
       />
 
       <main className="flex-1 flex flex-col min-w-0 relative">
         <ChatHeader
           member={member}
-          onClear={reset}
-          hasMessages={hasMessages}
+          onClear={onBackHome}
+          hasMessages={view.kind !== "home"}
           onOpenRail={() => setRailOpen(true)}
         />
 
-        {!hasMessages ? (
-          <EmptyState member={member} onPick={(prompt) => send(prompt)} />
-        ) : (
-          <div ref={scrollRef} className="flex-1 overflow-y-auto">
-            <div className="max-w-3xl mx-auto px-3 sm:px-6 py-5 sm:py-8 space-y-4 sm:space-y-5">
-              {messages.map((msg) => (
-                <MessageBubble
-                  key={msg.id}
-                  message={msg}
-                  member={msg.authorId !== "mochi" ? FAMILY[msg.authorId as FamilyId] : undefined}
-                />
-              ))}
-              {typing && <TypingBubble />}
-            </div>
-          </div>
+        {view.kind === "home" && (
+          <AppLibrary
+            member={member}
+            apps={apps}
+            loading={appsLoading}
+            onCreate={onCreate}
+            onOpen={onOpenApp}
+            onModify={onModifyOpen}
+          />
         )}
 
-        <Composer member={member} onSend={send} disabled={typing} />
+        {view.kind === "build" && currentApp && (
+          <BuildView
+            app={currentApp}
+            onDone={onBuildDone}
+            onBack={onBackHome}
+            onRetry={onRetryBuild}
+          />
+        )}
+
+        {view.kind === "open" && currentApp && (
+          <OpenView
+            app={currentApp}
+            member={member}
+            onBack={onBackHome}
+          />
+        )}
+
+        {(view.kind === "build" || view.kind === "open") && !currentApp && (
+          <div className="flex-1 flex items-center justify-center text-ink-faint italic">
+            Loading…
+          </div>
+        )}
       </main>
     </div>
   );
