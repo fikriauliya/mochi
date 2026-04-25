@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Match the kid-mode SPA palette so launch/idle frames don't flash white. -->
+    <color name="mochi_cream">#FBF1E1</color>
+    <color name="mochi_paper">#FFF8EA</color>
+    <color name="mochi_ink">#2A2421</color>
+    <color name="mochi_pink">#E0726B</color>
+    <color name="mochi_pink_soft">#FFE3DD</color>
+</resources>

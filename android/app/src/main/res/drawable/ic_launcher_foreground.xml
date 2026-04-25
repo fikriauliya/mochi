@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Mochi mascot — a plump pink rice cake. Lives in the safe 66dp inner
+     square of the 108dp adaptive icon canvas. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- soft shadow under -->
+    <path
+        android:fillColor="#1A2A2421"
+        android:pathData="M54,80m-22,0a22,4 0,1 1,44 0a22,4 0,1 1,-44 0" />
+
+    <!-- pebble body -->
+    <path
+        android:fillColor="#F7B7B0"
+        android:strokeColor="#CF7A72"
+        android:strokeWidth="1.4"
+        android:pathData="M54,28
+                          C 80,28 92,42 88,62
+                          C 84,80 70,82 54,82
+                          C 38,82 24,80 20,62
+                          C 16,42 28,28 54,28 Z" />
+
+    <!-- highlight blob -->
+    <path
+        android:fillColor="#80FFF8EA"
+        android:pathData="M40,38m-9,-4a9,4 0,1 1,18 0a9,4 0,1 1,-18 0" />
+
+    <!-- cheeks -->
+    <path
+        android:fillColor="#80F59389"
+        android:pathData="M36,66m-7,-4a7,4 0,1 1,14 0a7,4 0,1 1,-14 0" />
+    <path
+        android:fillColor="#80F59389"
+        android:pathData="M72,66m-7,-4a7,4 0,1 1,14 0a7,4 0,1 1,-14 0" />
+
+    <!-- eyes -->
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M44,54m-3,-4a3,4 0,1 1,6 0a3,4 0,1 1,-6 0" />
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M64,54m-3,-4a3,4 0,1 1,6 0a3,4 0,1 1,-6 0" />
+
+    <!-- mouth -->
+    <path
+        android:strokeColor="#2A2421"
+        android:strokeWidth="2"
+        android:strokeLineCap="round"
+        android:pathData="M48,68 Q54,73 60,68" />
+</vector>

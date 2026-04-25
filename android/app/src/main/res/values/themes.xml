@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Mochi" parent="Theme.MaterialComponents.DayNight">
+        <item name="colorPrimary">@color/mochi_pink</item>
+        <item name="colorPrimaryDark">@color/mochi_ink</item>
+        <item name="colorAccent">@color/mochi_pink</item>
+        <item name="android:windowBackground">@color/mochi_cream</item>
+        <item name="android:colorBackground">@color/mochi_cream</item>
+    </style>
+
+    <style name="Theme.Mochi.NoActionBar" parent="Theme.Mochi">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+</resources>

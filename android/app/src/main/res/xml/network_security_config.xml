@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    The Mochi server runs on the family's own LAN, so plain HTTP is the
+    expected transport. We allow cleartext globally; for a production
+    deploy that's reachable from the internet, swap this for HTTPS.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

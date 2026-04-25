@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Mochi</string>
+
+    <string name="settings_title">Mochi server</string>
+    <string name="settings_message">Enter the address of your Mochi server (e.g. http://192.168.1.42:3000).</string>
+    <string name="settings_error_prefix">Couldn\'t reach the server.</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_cancel">Cancel</string>
+</resources>

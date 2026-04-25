@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android TV's home rail expects a 320×180 banner. Vector renders cleanly
+     at any DPI. Cream background, a slightly larger Mochi mascot to the
+     left, and the wordmark to the right. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+
+    <path
+        android:fillColor="#FBF1E1"
+        android:pathData="M0,0h320v180h-320z" />
+
+    <!-- subtle warm corner glow -->
+    <path
+        android:fillColor="#33F7B7B0"
+        android:pathData="M260,-20a90,90 0,1 1,-180 0a90,90 0,1 1,180 0z" />
+
+    <!-- mascot, centered around (90, 92) -->
+    <path
+        android:fillColor="#1A2A2421"
+        android:pathData="M90,142m-32,0a32,5 0,1 1,64 0a32,5 0,1 1,-64 0" />
+    <path
+        android:fillColor="#F7B7B0"
+        android:strokeColor="#CF7A72"
+        android:strokeWidth="1.6"
+        android:pathData="M90,46
+                          C 122,46 138,62 134,90
+                          C 130,116 112,128 90,128
+                          C 68,128 50,116 46,90
+                          C 42,62 58,46 90,46 Z" />
+    <path
+        android:fillColor="#80FFF8EA"
+        android:pathData="M70,60m-10,-5a10,5 0,1 1,20 0a10,5 0,1 1,-20 0" />
+    <path
+        android:fillColor="#80F59389"
+        android:pathData="M68,102m-7,-4a7,4 0,1 1,14 0a7,4 0,1 1,-14 0" />
+    <path
+        android:fillColor="#80F59389"
+        android:pathData="M112,102m-7,-4a7,4 0,1 1,14 0a7,4 0,1 1,-14 0" />
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M80,86m-3,-4a3,4 0,1 1,6 0a3,4 0,1 1,-6 0" />
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M102,86m-3,-4a3,4 0,1 1,6 0a3,4 0,1 1,-6 0" />
+    <path
+        android:strokeColor="#2A2421"
+        android:strokeWidth="2.2"
+        android:strokeLineCap="round"
+        android:pathData="M84,104 Q91,110 98,104" />
+
+    <!-- wordmark "Mochi" — drawn as paths so we don't need a font -->
+    <!-- M -->
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M150,76 L150,124 L160,124 L160,96 L170,124 L176,124 L186,96 L186,124 L196,124 L196,76 L184,76 L173,108 L162,76 Z" />
+    <!-- o -->
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M218,90 C 230,90 236,100 236,110 C 236,120 230,128 218,128 C 206,128 200,120 200,110 C 200,100 206,90 218,90 Z M218,98 C 212,98 209,103 209,110 C 209,117 212,120 218,120 C 224,120 227,117 227,110 C 227,103 224,98 218,98 Z" />
+    <!-- c -->
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M256,90 C 264,90 268,93 270,98 L262,102 C 261,99 259,98 256,98 C 252,98 249,103 249,110 C 249,117 252,120 256,120 C 259,120 261,118 262,115 L270,118 C 268,124 264,128 256,128 C 244,128 240,120 240,110 C 240,100 244,90 256,90 Z" />
+    <!-- h -->
+    <path
+        android:fillColor="#2A2421"
+        android:pathData="M276,76 L276,124 L284,124 L284,108 C 284,103 286,100 290,100 C 294,100 295,103 295,108 L295,124 L303,124 L303,106 C 303,96 299,90 292,90 C 288,90 285,92 284,95 L284,76 Z" />
+    <!-- i -->
+    <path
+        android:fillColor="#E0726B"
+        android:pathData="M310,76 m -4,0 a 4,4 0 1,1 8,0 a 4,4 0 1,1 -8,0" />
+</vector>
