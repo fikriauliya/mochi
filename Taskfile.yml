@@ -1,0 +1,196 @@
+# Run with `task <name>` (see https://taskfile.dev). `task --list` shows
+# every command with its description.
+#
+# Tasks are organised by namespace:
+#   dev / serve    — Bun server
+#   android        — APK build, install, launch, log
+#   adb            — TV/phone wireless ADB helpers
+#   apps           — manage the generated-apps directory + SQLite registry
+#   util           — one-off niceties
+
+version: "3"
+
+vars:
+  # Default device IPs we've been using. Override on the CLI:
+  #   task android:install TV_IP=192.168.1.7
+  TV_IP: '{{ .TV_IP | default "192.168.1.6" }}'
+  TV_PORT: '{{ .TV_PORT | default "5555" }}'
+  PHONE_IP: '{{ .PHONE_IP | default "192.168.1.4" }}'
+  PHONE_PORT: '{{ .PHONE_PORT | default "44329" }}'
+  PORT: '{{ .PORT | default "3000" }}'
+  ANDROID_HOME: '{{ .ANDROID_HOME | default "/Users/ruangguru/Library/Android/sdk" }}'
+  STUDIO_JBR: "/Applications/Android Studio.app/Contents/jbr/Contents/Home"
+  # Absolute paths so we don't depend on whatever PATH the calling shell
+  # happened to bring in. Override ANDROID_HOME / STUDIO_JBR if your install
+  # is elsewhere.
+  ADB: '{{ .ANDROID_HOME }}/platform-tools/adb'
+
+env:
+  ANDROID_HOME: "{{ .ANDROID_HOME }}"
+  JAVA_HOME: "{{ .STUDIO_JBR }}"
+
+tasks:
+  # -------------- helpers --------------
+
+  default:
+    desc: List available tasks
+    cmds:
+      - task --list
+
+  ip:
+    desc: Print this Mac's LAN IP (the one Mochi serves on)
+    silent: true
+    cmds:
+      - 'ipconfig getifaddr en0 || ipconfig getifaddr en1'
+
+  # -------------- bun server --------------
+
+  dev:
+    desc: Start the Mochi dev server with HMR
+    cmds:
+      - bun --hot src/index.ts
+
+  serve:
+    desc: Start the server in the background, log to /tmp/mochi.log
+    cmds:
+      - lsof -i :{{ .PORT }} -t 2>/dev/null | xargs -r kill -9 2>/dev/null || true
+      - sleep 1
+      - nohup bun src/index.ts > /tmp/mochi.log 2>&1 &
+      - sleep 2
+      - 'curl -sS -o /dev/null -w "http :{{ .PORT }} → %{http_code}\n" http://localhost:{{ .PORT }}/'
+      - 'echo "Reachable on the LAN at http://$(ipconfig getifaddr en0 || ipconfig getifaddr en1):{{ .PORT }}"'
+
+  serve:stop:
+    desc: Kill the background server on PORT
+    cmds:
+      - 'lsof -i :{{ .PORT }} -t 2>/dev/null | xargs -r kill -9 2>/dev/null || true'
+      - 'echo "stopped"'
+
+  serve:log:
+    desc: Tail the background server log
+    cmds:
+      - tail -f /tmp/mochi.log
+
+  # -------------- adb / device --------------
+
+  adb:devices:
+    desc: List connected ADB devices
+    cmds:
+      - '{{ .ADB }} devices'
+
+  adb:tv:
+    desc: Connect to the TV via ADB ({{ .TV_IP }}:{{ .TV_PORT }})
+    cmds:
+      - '{{ .ADB }} connect {{ .TV_IP }}:{{ .TV_PORT }}'
+      - '{{ .ADB }} devices'
+
+  adb:phone:
+    desc: Connect to the phone via ADB ({{ .PHONE_IP }}:{{ .PHONE_PORT }})
+    cmds:
+      - '{{ .ADB }} connect {{ .PHONE_IP }}:{{ .PHONE_PORT }}'
+      - '{{ .ADB }} devices'
+
+  adb:pair:
+    desc: 'Pair a new wireless ADB device. Args: PAIR_PORT=46573 PIN=082396 IP=192.168.1.4'
+    cmds:
+      - '{{ .ADB }} pair {{ .IP }}:{{ .PAIR_PORT }} {{ .PIN }}'
+
+  adb:scan:
+    desc: mDNS-scan for ADB-reachable devices on the LAN
+    cmds:
+      - '{{ .ADB }} mdns services'
+
+  # -------------- android build / install / launch --------------
+
+  android:build:
+    desc: Assemble the debug APK
+    dir: android
+    cmds:
+      - ./gradlew assembleDebug
+
+  android:install:
+    desc: Build + install on a target device. Default is TV; override with TARGET=phone.
+    deps: [android:build]
+    cmds:
+      - 'task android:_install TARGET={{ .TARGET | default "tv" }}'
+
+  android:_install:
+    internal: true
+    cmds:
+      - |
+        if [ "{{ .TARGET }}" = "phone" ]; then
+          DEV="{{ .PHONE_IP }}:{{ .PHONE_PORT }}"
+        else
+          DEV="{{ .TV_IP }}:{{ .TV_PORT }}"
+        fi
+        {{ .ADB }} -s "$DEV" install -r android/app/build/outputs/apk/debug/app-debug.apk
+
+  android:launch:
+    desc: 'Open Mochi on a target device (TARGET=tv|phone, defaults to tv)'
+    cmds:
+      - |
+        if [ "{{ .TARGET | default "tv" }}" = "phone" ]; then
+          DEV="{{ .PHONE_IP }}:{{ .PHONE_PORT }}"
+        else
+          DEV="{{ .TV_IP }}:{{ .TV_PORT }}"
+        fi
+        {{ .ADB }} -s "$DEV" shell am start -n com.mochi.family/.MainActivity
+
+  android:run:
+    desc: 'Build, install, and launch in one go (TARGET=tv|phone)'
+    cmds:
+      - 'task android:install TARGET={{ .TARGET | default "tv" }}'
+      - 'task android:launch TARGET={{ .TARGET | default "tv" }}'
+
+  android:logcat:
+    desc: 'Tail logcat for the Mochi app on a target device (TARGET=tv|phone)'
+    cmds:
+      - |
+        if [ "{{ .TARGET | default "tv" }}" = "phone" ]; then
+          DEV="{{ .PHONE_IP }}:{{ .PHONE_PORT }}"
+        else
+          DEV="{{ .TV_IP }}:{{ .TV_PORT }}"
+        fi
+        {{ .ADB }} -s "$DEV" logcat -v color "*:S" "chromium:V" "WebView:V" "MochiFamily:V" "AndroidRuntime:E"
+
+  android:uninstall:
+    desc: 'Remove Mochi from a target device (TARGET=tv|phone)'
+    cmds:
+      - |
+        if [ "{{ .TARGET | default "tv" }}" = "phone" ]; then
+          DEV="{{ .PHONE_IP }}:{{ .PHONE_PORT }}"
+        else
+          DEV="{{ .TV_IP }}:{{ .TV_PORT }}"
+        fi
+        {{ .ADB }} -s "$DEV" uninstall com.mochi.family
+
+  # -------------- generated apps + sqlite --------------
+
+  apps:list:
+    desc: List apps in the registry
+    cmds:
+      - 'curl -sS http://localhost:{{ .PORT }}/api/apps | bun -e ''const a = await Bun.stdin.json(); for (const x of a) console.log(`${x.status[0]} ${x.id}\t${x.emoji} ${x.name}`)'''
+
+  apps:clean:
+    desc: 'WIPE every generated app + the SQLite registry. Asks for confirmation.'
+    prompt: "This deletes every app under apps/ and the SQLite db. Sure?"
+    cmds:
+      - 'rm -rf apps/* data/mochi.db data/mochi.db-shm data/mochi.db-wal'
+      - 'touch apps/.gitkeep'
+      - 'echo "wiped — restart the server to start with a fresh DB"'
+
+  # -------------- macOS firewall --------------
+
+  firewall:allow-bun:
+    desc: 'Allow incoming connections to bun (needs sudo). Restart the server after.'
+    cmds:
+      - sudo /usr/libexec/ApplicationFirewall/socketfilterfw --add "$HOME/.bun/bin/bun"
+      - sudo /usr/libexec/ApplicationFirewall/socketfilterfw --unblockapp "$HOME/.bun/bin/bun"
+      - /usr/libexec/ApplicationFirewall/socketfilterfw --getappblocked "$HOME/.bun/bin/bun"
+
+  # -------------- typecheck / quick checks --------------
+
+  check:
+    desc: TypeScript type-check (skips agent-generated apps/)
+    cmds:
+      - bunx tsc --noEmit
