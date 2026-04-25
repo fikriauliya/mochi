@@ -11,6 +11,7 @@ type Props = {
   apps: App[];
   onOpenApp: (id: string) => void;
   onNewApp: () => void;
+  onEnterKidMode: () => void;
 };
 
 export function ProfileRail({
@@ -19,6 +20,7 @@ export function ProfileRail({
   apps,
   onOpenApp,
   onNewApp,
+  onEnterKidMode,
 }: Props) {
   // Newest 12 apps for the rail
   const recent = [...apps].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, 12);
@@ -164,6 +166,24 @@ export function ProfileRail({
               ))}
             </ul>
           )}
+        </div>
+
+        {/* kid mode entry */}
+        <div className="px-4 pb-2 rise-in" style={{ animationDelay: "240ms" }}>
+          <button
+            onClick={onEnterKidMode}
+            className="
+              w-full inline-flex items-center justify-center gap-2
+              rounded-full px-4 py-2
+              border border-line bg-paper hover:bg-cream-deep
+              text-[0.82rem] text-ink-soft
+              transition-colors
+            "
+            title="Voice-only, big-button mode for little kids"
+          >
+            <span aria-hidden>👶</span>
+            Kid mode
+          </button>
         </div>
 
         {/* footer */}

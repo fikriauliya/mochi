@@ -4,7 +4,9 @@ import { ChatHeader } from "./components/ChatHeader";
 import { AppLibrary } from "./components/AppLibrary";
 import { BuildView } from "./components/BuildView";
 import { OpenView } from "./components/OpenView";
+import { KidShell } from "./components/KidShell";
 import { createApp, listApps, getApp, modifyApp } from "./lib/api";
+import { useKidMode } from "./lib/kidMode";
 import type { App } from "./lib/types";
 import "./index.css";
 
@@ -34,6 +36,7 @@ export function App() {
   const [apps, setApps] = React.useState<App[]>([]);
   const [appsLoading, setAppsLoading] = React.useState(true);
   const [railOpen, setRailOpen] = React.useState(false);
+  const [kidMode, setKidMode] = useKidMode();
 
   // Sync view with the URL on browser back/forward
   React.useEffect(() => {
@@ -158,6 +161,20 @@ export function App() {
 
   // ---- Render ----
 
+  if (kidMode) {
+    return (
+      <KidShell
+        apps={apps}
+        view={view}
+        currentApp={currentApp}
+        onCreate={onCreate}
+        onOpenApp={onOpenApp}
+        onBack={onBackHome}
+        onExitKidMode={() => setKidMode(false)}
+      />
+    );
+  }
+
   return (
     <div className="h-dvh w-screen flex overflow-hidden">
       <ProfileRail
@@ -166,6 +183,7 @@ export function App() {
         apps={apps}
         onOpenApp={onOpenApp}
         onNewApp={onBackHome}
+        onEnterKidMode={() => setKidMode(true)}
       />
 
       <main className="flex-1 flex flex-col min-w-0 relative">
