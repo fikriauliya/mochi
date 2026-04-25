@@ -54,6 +54,21 @@ WebView on a TV with a D-pad remote — no mouse, no touch). That means:
 - Auto-focus the primary action when a screen mounts (autoFocus on the most
   important <button> in the initial render).
 - Generous spacing, warm-not-childish colors, system fonts, inline SVG icons.
+
+Sound effects (kids love them, and they make a TV feel alive):
+- Synthesize short tones with the Web Audio API — no audio files, no
+  external assets. A single AudioContext + an Oscillator + a Gain envelope
+  is enough for taps, success chimes, and error blips.
+- Lazily create the AudioContext on the first user interaction
+  (autoplay policies block it before then). Reuse one context for the
+  whole app.
+- Short envelopes (≤200ms total) and low gain (peak ≤ 0.2). TVs amplify
+  everything — quiet is the default.
+- Provide a small mute toggle (e.g. a 🔊 / 🔇 <button>) and persist the
+  choice in localStorage so a parent can silence the app once and have
+  it stay silent across launches.
+- Sensible defaults: a brief click on tap, a rising arpeggio for success,
+  a single low tone for "no" / wrong. Don't overdo it.
 `.trim();
 
 const decodeEvent = S.decodeUnknown(ClaudeStreamEvent);
