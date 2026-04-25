@@ -1,16 +1,13 @@
-import { FamilyAvatar } from "./FamilyAvatar";
 import { Mochi } from "./Mochi";
-import type { FamilyMember } from "@/lib/family";
 import { Sparkles, RefreshCcw, Menu } from "lucide-react";
 
 type Props = {
-  member: FamilyMember;
   onClear: () => void;
   hasMessages: boolean;
   onOpenRail: () => void;
 };
 
-export function ChatHeader({ member, onClear, hasMessages, onOpenRail }: Props) {
+export function ChatHeader({ onClear, hasMessages, onOpenRail }: Props) {
   return (
     <header
       className="
@@ -23,7 +20,6 @@ export function ChatHeader({ member, onClear, hasMessages, onOpenRail }: Props) 
       style={{ paddingTop: "max(env(safe-area-inset-top), 1rem)" }}
     >
       <div className="flex items-center gap-3 sm:gap-4 min-w-0">
-        {/* Mobile drawer trigger */}
         <button
           onClick={onOpenRail}
           className="
@@ -42,7 +38,7 @@ export function ChatHeader({ member, onClear, hasMessages, onOpenRail }: Props) 
           <span
             className="
               absolute -bottom-0 -right-0
-              size-3 rounded-full bg-mom
+              size-3 rounded-full bg-mochi-deep
               ring-2 ring-cream
               shadow-[0_0_0_1px_rgba(42,36,33,0.18)]
             "
@@ -52,23 +48,18 @@ export function ChatHeader({ member, onClear, hasMessages, onOpenRail }: Props) 
 
         <div className="leading-tight min-w-0">
           <div className="hidden sm:flex items-center gap-2 text-[0.7rem] uppercase tracking-[0.18em] text-ink-faint">
-            <Sparkles className="size-3 text-mochi-deep" /> building as
+            <Sparkles className="size-3 text-mochi-deep" /> family kitchen
           </div>
           <h1
             className="font-display text-[1.25rem] sm:text-2xl text-ink truncate"
             style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
           >
-            {member.name}{" "}
-            <span className="hidden sm:inline text-ink-faint italic font-normal text-xl">·</span>{" "}
-            <span className="hidden sm:inline italic text-ink-soft text-xl">{member.role}</span>
+            Mochi
           </h1>
         </div>
       </div>
 
       <div className="flex items-center gap-2 sm:gap-3 shrink-0">
-        <span className="hidden sm:block">
-          <FamilyAvatar id={member.id} size={42} />
-        </span>
         {hasMessages && (
           <button
             onClick={onClear}

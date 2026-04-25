@@ -3,13 +3,11 @@ import { CreateComposer } from "./CreateComposer";
 import { AgentLog } from "./AgentLog";
 import { modifyApp, subscribeStream } from "@/lib/api";
 import type { App, BuildEvent } from "@/lib/types";
-import type { FamilyMember } from "@/lib/family";
 import { cn } from "@/lib/utils";
 import { X, Sparkles } from "lucide-react";
 
 type Props = {
   app: App;
-  member: FamilyMember;
   open: boolean;
   onClose: () => void;
   /** Called when a modify completes successfully so the iframe can refresh. */
@@ -18,12 +16,11 @@ type Props = {
 
 type Phase = "idle" | "running" | "done" | "error";
 
-export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) {
+export function ModifyDrawer({ app, open, onClose, onModified }: Props) {
   const [phase, setPhase] = React.useState<Phase>("idle");
   const [events, setEvents] = React.useState<BuildEvent[]>([]);
   const [errorMessage, setErrorMessage] = React.useState("");
 
-  // Reset events when drawer is reopened on a clean state
   React.useEffect(() => {
     if (!open) return;
     if (phase === "idle") {
@@ -32,7 +29,6 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
     }
   }, [open, phase]);
 
-  // Close drawer on Escape
   React.useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -48,7 +44,7 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
     setPhase("running");
 
     try {
-      await modifyApp(app.id, { prompt, ownerId: member.id });
+      await modifyApp(app.id, { prompt });
     } catch (e) {
       setPhase("error");
       setErrorMessage(e instanceof Error ? e.message : String(e));
@@ -61,7 +57,6 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
         setPhase("done");
         unsub();
         onModified();
-        // Allow another round of modifications
         setTimeout(() => setPhase("idle"), 1200);
       } else if (ev.type === "error") {
         setPhase("error");
@@ -73,7 +68,6 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
 
   return (
     <>
-      {/* backdrop */}
       <div
         onClick={onClose}
         className={cn(
@@ -84,14 +78,11 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
         aria-hidden={!open}
       />
 
-      {/* drawer: bottom sheet on mobile, right sheet on desktop */}
       <div
         className={cn(
           "fixed z-50 bg-paper border-line shadow-[0_-12px_60px_-20px_rgba(42,36,33,0.4)]",
           "flex flex-col",
-          // mobile: bottom sheet
           "inset-x-0 bottom-0 max-h-[85vh] rounded-t-[28px] border-t",
-          // desktop: right sheet
           "md:inset-y-0 md:right-0 md:left-auto md:bottom-auto md:top-auto",
           "md:w-[26rem] md:max-h-none md:rounded-none md:rounded-l-[28px] md:border-l md:border-t-0",
           "transition-transform duration-300 ease-out",
@@ -103,7 +94,6 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
           paddingBottom: "max(env(safe-area-inset-bottom), 1rem)",
         }}
       >
-        {/* header */}
         <div className="flex items-center justify-between px-5 pt-5 pb-3">
           <div className="flex items-center gap-2">
             <Sparkles className="size-4 text-mochi-deep" />
@@ -123,7 +113,6 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
           </button>
         </div>
 
-        {/* status line */}
         <div className="px-5 pb-2">
           <p className="text-[0.85rem] italic text-ink-faint">
             {phase === "running"
@@ -136,7 +125,6 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
           </p>
         </div>
 
-        {/* event log */}
         {(phase === "running" || phase === "done" || phase === "error") && events.length > 0 && (
           <div className="px-5 pb-3 flex-1 min-h-0 overflow-hidden">
             <AgentLog events={events} />
@@ -149,14 +137,13 @@ export function ModifyDrawer({ app, member, open, onClose, onModified }: Props) 
           </div>
         )}
 
-        {/* composer */}
         <div className="px-3 sm:px-5 pt-2 mt-auto">
           <CreateComposer
-            member={member}
             onSubmit={submit}
             disabled={phase === "running"}
-            placeholder={`What should change, ${member.name}? (e.g. "make the buttons purple")`}
+            placeholder={`What should change? (e.g. "make the buttons purple")`}
             submitLabel={phase === "running" ? "Working…" : "Change it"}
+            hideSuggestions
           />
         </div>
       </div>

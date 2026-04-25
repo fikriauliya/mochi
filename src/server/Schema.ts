@@ -1,8 +1,5 @@
 import { Schema as S } from "effect";
 
-export const FamilyId = S.Literal("dad", "mom", "aira", "kenji");
-export type FamilyId = S.Schema.Type<typeof FamilyId>;
-
 export const AppStatus = S.Literal("building", "ready", "error");
 export type AppStatus = S.Schema.Type<typeof AppStatus>;
 
@@ -13,7 +10,6 @@ export const App = S.Struct({
   name: S.String,
   emoji: S.String,
   description: S.String,
-  ownerId: FamilyId,
   prompt: S.String,
   status: AppStatus,
   createdAt: S.Number,
@@ -25,7 +21,6 @@ export type App = S.Schema.Type<typeof App>;
 /** Body of POST /api/apps and POST /api/apps/:id/modify. */
 export const CreateAppRequest = S.Struct({
   prompt: S.String.pipe(S.minLength(1), S.maxLength(2000)),
-  ownerId: FamilyId,
 });
 export type CreateAppRequest = S.Schema.Type<typeof CreateAppRequest>;
 

@@ -1,4 +1,3 @@
-import type { FamilyId } from "./family";
 import type { App, BuildEvent } from "./types";
 
 export class ApiError extends Error {
@@ -30,10 +29,7 @@ export const listApps = (): Promise<App[]> =>
 export const getApp = (id: string): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}`).then((r) => asJson<App>(r));
 
-export const createApp = (input: {
-  prompt: string;
-  ownerId: FamilyId;
-}): Promise<App> =>
+export const createApp = (input: { prompt: string }): Promise<App> =>
   fetch("/api/apps", {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -42,7 +38,7 @@ export const createApp = (input: {
 
 export const modifyApp = (
   id: string,
-  input: { prompt: string; ownerId: FamilyId },
+  input: { prompt: string },
 ): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}/modify`, {
     method: "POST",

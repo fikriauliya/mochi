@@ -4,7 +4,6 @@ import { ChatHeader } from "./components/ChatHeader";
 import { AppLibrary } from "./components/AppLibrary";
 import { BuildView } from "./components/BuildView";
 import { OpenView } from "./components/OpenView";
-import { FAMILY, type FamilyId } from "./lib/family";
 import { createApp, listApps, getApp, modifyApp } from "./lib/api";
 import type { App } from "./lib/types";
 import "./index.css";
@@ -29,15 +28,12 @@ function pathFromView(view: View): string {
 }
 
 export function App() {
-  const [activeId, setActiveId] = React.useState<FamilyId>("aira");
   const [view, setView] = React.useState<View>(() =>
     viewFromPath(window.location.pathname),
   );
   const [apps, setApps] = React.useState<App[]>([]);
   const [appsLoading, setAppsLoading] = React.useState(true);
   const [railOpen, setRailOpen] = React.useState(false);
-
-  const member = FAMILY[activeId];
 
   // Sync view with the URL on browser back/forward
   React.useEffect(() => {
@@ -115,24 +111,15 @@ export function App() {
   const onCreate = React.useCallback(
     async (prompt: string) => {
       try {
-        const app = await createApp({ prompt, ownerId: activeId });
-        // optimistic insert; we'll reload after build completes
+        const app = await createApp({ prompt });
         setApps((cur) => [app, ...cur.filter((a) => a.id !== app.id)]);
         navigate({ kind: "build", appId: app.id });
       } catch (e) {
-        // bubble up minimally for now; UI can show toast in v2
         console.error("createApp failed", e);
       }
     },
-    [activeId, navigate],
+    [navigate],
   );
-
-  const onSelectMember = React.useCallback((id: FamilyId) => {
-    setActiveId(id);
-    setRailOpen(false);
-    // Stay on current view — switching member just changes the composer color
-    // and the requesting attribution.
-  }, []);
 
   const onOpenApp = React.useCallback(
     (id: string) => navigate({ kind: "open", appId: id }),
@@ -155,18 +142,14 @@ export function App() {
   const onRetryBuild = React.useCallback(async () => {
     if (view.kind !== "build" || !currentApp) return;
     try {
-      const app = await modifyApp(currentApp.id, {
-        prompt: currentApp.prompt,
-        ownerId: activeId,
-      });
+      const app = await modifyApp(currentApp.id, { prompt: currentApp.prompt });
       setCurrentApp(app);
-      // Force the BuildView to reset by remounting
       navigate({ kind: "home" });
       setTimeout(() => navigate({ kind: "build", appId: app.id }), 50);
     } catch (e) {
       console.error("retry failed", e);
     }
-  }, [view, currentApp, activeId, navigate]);
+  }, [view, currentApp, navigate]);
 
   const onBackHome = React.useCallback(
     () => navigate({ kind: "home" }),
@@ -178,18 +161,15 @@ export function App() {
   return (
     <div className="h-dvh w-screen flex overflow-hidden">
       <ProfileRail
-        active={activeId}
-        onSelect={onSelectMember}
-        onNewChat={onBackHome}
         mobileOpen={railOpen}
         onMobileClose={() => setRailOpen(false)}
         apps={apps}
         onOpenApp={onOpenApp}
+        onNewApp={onBackHome}
       />
 
       <main className="flex-1 flex flex-col min-w-0 relative">
         <ChatHeader
-          member={member}
           onClear={onBackHome}
           hasMessages={view.kind !== "home"}
           onOpenRail={() => setRailOpen(true)}
@@ -197,7 +177,6 @@ export function App() {
 
         {view.kind === "home" && (
           <AppLibrary
-            member={member}
             apps={apps}
             loading={appsLoading}
             onCreate={onCreate}
@@ -216,11 +195,7 @@ export function App() {
         )}
 
         {view.kind === "open" && currentApp && (
-          <OpenView
-            app={currentApp}
-            member={member}
-            onBack={onBackHome}
-          />
+          <OpenView app={currentApp} onBack={onBackHome} />
         )}
 
         {(view.kind === "build" || view.kind === "open") && !currentApp && (

@@ -1,7 +1,5 @@
 import type { App } from "@/lib/types";
-import { FAMILY } from "@/lib/family";
 import { cn } from "@/lib/utils";
-import { FamilyAvatar } from "./FamilyAvatar";
 import { Pencil, Play } from "lucide-react";
 
 type Props = {
@@ -17,8 +15,6 @@ const statusLabel: Record<App["status"], string> = {
 };
 
 export function AppCard({ app, onOpen, onModify }: Props) {
-  const owner = FAMILY[app.ownerId];
-
   return (
     <div
       className={cn(
@@ -27,22 +23,6 @@ export function AppCard({ app, onOpen, onModify }: Props) {
         "transition-all duration-200 hover:-translate-y-0.5 hover:border-line-strong",
       )}
     >
-      {/* Owner badge top-right */}
-      <span
-        className={cn(
-          "absolute -top-2 -right-2 flex items-center gap-1.5 px-2 py-1 rounded-full text-[0.65rem] font-bold uppercase tracking-[0.16em]",
-          {
-            "bg-dad-soft text-dad ring-2 ring-dad/40": owner.id === "dad",
-            "bg-mom-soft text-mom ring-2 ring-mom/40": owner.id === "mom",
-            "bg-aira-soft text-aira ring-2 ring-aira/40": owner.id === "aira",
-            "bg-kenji-soft text-kenji ring-2 ring-kenji/40": owner.id === "kenji",
-          },
-        )}
-      >
-        <FamilyAvatar id={owner.id} size={18} />
-        {owner.name}
-      </span>
-
       <div className="flex items-start gap-3">
         <span
           className="

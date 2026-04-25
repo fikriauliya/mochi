@@ -1,5 +1,3 @@
-import type { FamilyId } from "./family";
-
 export type AppStatus = "building" | "ready" | "error";
 
 /** Mirror of src/server/Schema.ts App. */
@@ -9,7 +7,6 @@ export type App = {
   name: string;
   emoji: string;
   description: string;
-  ownerId: FamilyId;
   prompt: string;
   status: AppStatus;
   createdAt: number;

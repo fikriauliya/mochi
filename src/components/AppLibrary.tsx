@@ -1,11 +1,9 @@
 import type { App } from "@/lib/types";
-import type { FamilyMember } from "@/lib/family";
 import { Mochi } from "./Mochi";
 import { AppCard } from "./AppCard";
 import { CreateComposer } from "./CreateComposer";
 
 type Props = {
-  member: FamilyMember;
   apps: App[];
   loading: boolean;
   onCreate: (prompt: string) => void;
@@ -14,7 +12,6 @@ type Props = {
 };
 
 export function AppLibrary({
-  member,
   apps,
   loading,
   onCreate,
@@ -39,14 +36,13 @@ export function AppLibrary({
               className="font-display text-[1.8rem] sm:text-[2.2rem] lg:text-[2.6rem] leading-[1.05] text-ink"
               style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
             >
-              Hi {member.name}.{" "}
-              <span className="italic text-ink-soft">What shall we make?</span>
+              <span className="italic text-ink-soft">What shall we make today?</span>
             </h2>
           </div>
         </div>
 
         <div className="rise-in" style={{ animationDelay: "100ms" }}>
-          <CreateComposer member={member} onSubmit={onCreate} />
+          <CreateComposer onSubmit={onCreate} />
         </div>
 
         {/* Library grid */}

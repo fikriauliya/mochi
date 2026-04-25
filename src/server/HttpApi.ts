@@ -36,9 +36,9 @@ function slug(s: string): string {
     .slice(0, 24);
 }
 
-function newAppId(prompt: string, ownerId: string): string {
+function newAppId(prompt: string): string {
   const stem = slug(prompt) || "app";
-  return `${ownerId}-${stem}-${shortHex(2)}`;
+  return `${stem}-${shortHex(2)}`;
 }
 
 const newSessionId = (): string => crypto.randomUUID();
@@ -104,7 +104,7 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
                 catch: () => new Error("invalid JSON body"),
               });
               const parsed = yield* decodeCreate(body);
-              const id = newAppId(parsed.prompt, parsed.ownerId);
+              const id = newAppId(parsed.prompt);
               const sessionId = newSessionId();
               const now = Date.now();
               const app: App = {
@@ -113,7 +113,6 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
                 name: parsed.prompt.slice(0, 60),
                 emoji: "🍡",
                 description: parsed.prompt,
-                ownerId: parsed.ownerId,
                 prompt: parsed.prompt,
                 status: "building",
                 createdAt: now,

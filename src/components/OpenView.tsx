@@ -1,23 +1,20 @@
 import * as React from "react";
 import type { App } from "@/lib/types";
-import type { FamilyMember } from "@/lib/family";
 import { ArrowLeft, Pencil, ExternalLink } from "lucide-react";
 import { ModifyDrawer } from "./ModifyDrawer";
 import { cn } from "@/lib/utils";
 
 type Props = {
   app: App;
-  member: FamilyMember;
   onBack: () => void;
 };
 
-export function OpenView({ app, member, onBack }: Props) {
+export function OpenView({ app, onBack }: Props) {
   const [drawerOpen, setDrawerOpen] = React.useState(false);
   const [iframeKey, setIframeKey] = React.useState(0);
 
   return (
     <div className="flex-1 flex flex-col min-h-0">
-      {/* slim chrome bar */}
       <div
         className={cn(
           "flex items-center gap-2 sm:gap-3",
@@ -84,7 +81,6 @@ export function OpenView({ app, member, onBack }: Props) {
         </button>
       </div>
 
-      {/* the app, sandboxed */}
       <iframe
         key={iframeKey}
         src={`/apps/${app.id}/?t=${iframeKey}`}
@@ -95,7 +91,6 @@ export function OpenView({ app, member, onBack }: Props) {
 
       <ModifyDrawer
         app={app}
-        member={member}
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         onModified={() => setIframeKey((k) => k + 1)}

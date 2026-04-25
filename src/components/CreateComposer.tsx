@@ -1,16 +1,15 @@
 import * as React from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { ArrowUp, Sparkles } from "lucide-react";
-import type { FamilyMember } from "@/lib/family";
 import { cn } from "@/lib/utils";
 
 type Props = {
-  member: FamilyMember;
   onSubmit: (prompt: string) => void;
   disabled?: boolean;
-  /** Override the placeholder/CTA copy (used by ModifyDrawer). */
   placeholder?: string;
   submitLabel?: string;
+  /** When true, hides the suggestion chips (e.g. inside ModifyDrawer). */
+  hideSuggestions?: boolean;
 };
 
 const SUGGESTIONS = [
@@ -22,11 +21,11 @@ const SUGGESTIONS = [
 ];
 
 export function CreateComposer({
-  member,
   onSubmit,
   disabled,
-  placeholder,
+  placeholder = "What should we build today?",
   submitLabel = "Build it",
+  hideSuggestions = false,
 }: Props) {
   const [value, setValue] = React.useState("");
   const taRef = React.useRef<HTMLTextAreaElement>(null);
@@ -57,23 +56,6 @@ export function CreateComposer({
       )}
     >
       <div className="flex items-end gap-3">
-        <div
-          className={cn(
-            "size-10 rounded-full shrink-0 ring-2 ring-offset-2 ring-offset-paper",
-            "flex items-center justify-center",
-            "text-[0.78rem] font-bold uppercase tracking-wider",
-            {
-              "bg-dad-soft text-dad ring-dad/40": member.id === "dad",
-              "bg-mom-soft text-mom ring-mom/40": member.id === "mom",
-              "bg-aira-soft text-aira ring-aira/40": member.id === "aira",
-              "bg-kenji-soft text-kenji ring-kenji/40": member.id === "kenji",
-            },
-          )}
-          title={`Building as ${member.name}`}
-        >
-          {member.short}
-        </div>
-
         <Textarea
           ref={taRef}
           rows={1}
@@ -85,9 +67,7 @@ export function CreateComposer({
               submit();
             }
           }}
-          placeholder={
-            placeholder ?? `What should we build today, ${member.name}?`
-          }
+          placeholder={placeholder}
           className={cn(
             "min-h-[2.75rem] resize-none border-0 shadow-none",
             "bg-transparent focus-visible:ring-0 focus-visible:border-0",
@@ -113,7 +93,7 @@ export function CreateComposer({
         </button>
       </div>
 
-      {!placeholder && (
+      {!hideSuggestions && (
         <div className="flex flex-wrap items-center gap-1.5 mt-3 pl-1">
           <span className="text-[0.7rem] uppercase tracking-[0.18em] text-ink-faint mr-1">
             try
