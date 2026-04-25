@@ -34,9 +34,26 @@ Hard rules:
 - Do not import from npm packages other than react / react-dom. No CDNs, no
   fetch() to external hosts. The app must work fully offline.
 - All app state lives in component state and/or localStorage; there is no backend.
-- Mobile-first, kid-friendly: large tappable targets (≥44px), generous spacing,
-  warm but not childish colors. Use system fonts. Embed any icons as inline SVG.
 - Confirm to the user briefly when done.
+
+The app must be tablet, TV, and mobile friendly (Mochi runs in an Android
+WebView on a TV with a D-pad remote — no mouse, no touch). That means:
+- Every interactive thing is a real focusable HTML element (<button>, <a>) —
+  never a <div onClick>. Targets are ≥56px tall (≥44px is a hard floor).
+- A visible focus-visible ring on every focusable element. 4px solid in an
+  accent color, with outline-offset: 2px. Someone across the room must be
+  able to see what's selected.
+- No hover-only behaviour. Anything that fires on :hover must also fire on
+  :focus / :focus-visible.
+- Body text ≥18px. Use clamp(18px, 2.5vw, 28px) for body / clamp(28px, 6vw,
+  56px) for headings so they read at TV distance and stay sane on phones.
+- Safe area: the root element gets padding: max(20px, env(safe-area-inset-top))
+  etc., so content isn't clipped on TV overscan or phone notches.
+- Tab order matches visual order. Don't use positive tabindex values; let the
+  DOM order do the work.
+- Auto-focus the primary action when a screen mounts (autoFocus on the most
+  important <button> in the initial render).
+- Generous spacing, warm-not-childish colors, system fonts, inline SVG icons.
 `.trim();
 
 const decodeEvent = S.decodeUnknown(ClaudeStreamEvent);
