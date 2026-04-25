@@ -9,6 +9,9 @@ import {
   Trash2,
   ChevronRight,
   ChevronDown,
+  MoreHorizontal,
+  Keyboard,
+  Sparkles,
 } from "lucide-react";
 import { Mochi } from "./Mochi";
 import { AgentLog } from "./AgentLog";
@@ -136,11 +139,11 @@ function KidHome(props: {
 }) {
   const { apps, onOpenApp, onCreate, onModify, onReload } = props;
   const [lang, setLang] = useSpeechLang();
-  type Voice =
+  type Composer =
     | { kind: "idle" }
-    | { kind: "create" }
-    | { kind: "modify"; app: App };
-  const [voice, setVoice] = React.useState<Voice>({ kind: "idle" });
+    | { kind: "voice"; intent: "create" | "modify"; app?: App }
+    | { kind: "text"; intent: "create" | "modify"; app?: App; seed?: string };
+  const [composer, setComposer] = React.useState<Composer>({ kind: "idle" });
   const [menuApp, setMenuApp] = React.useState<App | null>(null);
 
   // newest first; show all statuses
@@ -154,7 +157,7 @@ function KidHome(props: {
 
       <div className="flex-1 flex flex-col items-center justify-center gap-6 px-6">
         <button
-          onClick={() => setVoice({ kind: "create" })}
+          onClick={() => setComposer({ kind: "voice", intent: "create" })}
           aria-label="Tap to talk"
           className="
             relative inline-flex items-center justify-center
@@ -194,6 +197,18 @@ function KidHome(props: {
             </button>
           ))}
         </div>
+
+        {/* Type-instead fallback for adults / when voice isn't an option */}
+        <button
+          onClick={() => setComposer({ kind: "text", intent: "create" })}
+          className="
+            inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full
+            text-[0.78rem] text-ink-soft hover:text-ink hover:bg-cream-deep
+            transition-colors
+          "
+        >
+          <Keyboard className="size-3.5" /> or type instead
+        </button>
       </div>
 
       <div className="px-4 pb-6 sm:pb-8">
@@ -211,23 +226,47 @@ function KidHome(props: {
                 key={app.id}
                 app={app}
                 onOpen={onOpenApp}
-                onLongPress={() => setMenuApp(app)}
+                onMenu={() => setMenuApp(app)}
               />
             ))}
           </div>
         )}
       </div>
 
-      {voice.kind !== "idle" && (
+      {composer.kind === "voice" && (
         <KidMicOverlay
           lang={lang}
-          intent={voice.kind}
-          onClose={() => setVoice({ kind: "idle" })}
+          intent={composer.intent}
+          onClose={() => setComposer({ kind: "idle" })}
+          onSwitchToType={(seed) => {
+            const c = composer;
+            setComposer({
+              kind: "text",
+              intent: c.intent,
+              ...(c.app !== undefined ? { app: c.app } : {}),
+              ...(seed !== undefined ? { seed } : {}),
+            });
+          }}
           onPrompt={(prompt) => {
-            const v = voice;
-            setVoice({ kind: "idle" });
-            if (v.kind === "create") onCreate(prompt);
-            else if (v.kind === "modify") onModify(v.app.id, prompt);
+            const c = composer;
+            setComposer({ kind: "idle" });
+            if (c.intent === "create") onCreate(prompt);
+            else if (c.app) onModify(c.app.id, prompt);
+          }}
+        />
+      )}
+
+      {composer.kind === "text" && (
+        <KidTypeOverlay
+          intent={composer.intent}
+          target={composer.app}
+          initial={composer.seed ?? ""}
+          onClose={() => setComposer({ kind: "idle" })}
+          onSubmit={(prompt) => {
+            const c = composer;
+            setComposer({ kind: "idle" });
+            if (c.intent === "create") onCreate(prompt);
+            else if (c.app) onModify(c.app.id, prompt);
           }}
         />
       )}
@@ -242,7 +281,7 @@ function KidHome(props: {
           }}
           onModify={(app) => {
             setMenuApp(null);
-            setVoice({ kind: "modify", app });
+            setComposer({ kind: "voice", intent: "modify", app });
           }}
           onDelete={async (id) => {
             try {
@@ -262,63 +301,90 @@ function KidHome(props: {
 function KidAppTile({
   app,
   onOpen,
-  onLongPress,
+  onMenu,
 }: {
   app: App;
   onOpen: (id: string) => void;
-  onLongPress: () => void;
+  onMenu: () => void;
 }) {
-  const longPress = useLongPress(onLongPress, 700);
+  const longPress = useLongPress(onMenu, 700);
   const isReady = app.status === "ready";
   const isBuilding = app.status === "building";
   const isError = app.status === "error";
 
   return (
-    <button
-      {...longPress.handlers}
-      onClick={() => isReady && onOpen(app.id)}
-      disabled={!isReady}
+    <div
       className={cn(
-        "relative aspect-square rounded-3xl border p-3",
-        "flex flex-col items-center justify-center gap-2",
+        "relative aspect-square rounded-3xl border",
         "shadow-[0_1px_0_var(--color-paper-shadow),0_18px_30px_-22px_rgba(42,36,33,0.35)]",
         "transition-transform",
-        isReady &&
-          "bg-paper border-line hover:scale-[1.04] active:scale-95 cursor-pointer",
+        isReady && "bg-paper border-line hover:scale-[1.04] active:scale-[0.98]",
         isBuilding && "bg-mochi-soft border-mochi-deep/40",
-        isError && "bg-mom-soft border-mom/40 cursor-help",
-        "focus:outline-none focus:ring-4 focus:ring-mochi-soft",
+        isError && "bg-mom-soft border-mom/40",
       )}
     >
-      <span
+      <button
+        {...longPress.handlers}
+        onClick={() => isReady && onOpen(app.id)}
+        disabled={!isReady}
         className={cn(
-          "text-5xl sm:text-6xl",
-          !isReady && "grayscale opacity-60",
+          "absolute inset-0 rounded-3xl p-3",
+          "flex flex-col items-center justify-center gap-2",
+          isReady ? "cursor-pointer" : "cursor-help",
+          "focus:outline-none focus:ring-4 focus:ring-mochi-soft",
         )}
-        aria-hidden
       >
-        {app.emoji || "✨"}
-      </span>
-      <span
-        className="font-display text-[0.95rem] sm:text-base text-ink line-clamp-2 text-center leading-tight"
-        style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
-      >
-        {app.name}
-      </span>
+        <span
+          className={cn(
+            "text-5xl sm:text-6xl",
+            !isReady && "grayscale opacity-60",
+          )}
+          aria-hidden
+        >
+          {app.emoji || "✨"}
+        </span>
+        <span
+          className="font-display text-[0.95rem] sm:text-base text-ink line-clamp-2 text-center leading-tight px-2"
+          style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
+        >
+          {app.name}
+        </span>
 
-      {isBuilding && (
-        <div className="absolute top-1.5 right-2 flex items-center gap-1 text-[0.62rem] uppercase tracking-[0.16em] font-bold text-mochi-deep">
-          <span className="dot size-1.5 rounded-full bg-mochi-deep" />
-          <span className="dot dot-2 size-1.5 rounded-full bg-mochi-deep" />
-          <span className="dot dot-3 size-1.5 rounded-full bg-mochi-deep" />
-        </div>
-      )}
-      {isError && (
-        <div className="absolute top-1.5 right-2 text-[0.62rem] uppercase tracking-[0.16em] font-bold text-mom">
-          stuck
-        </div>
-      )}
-    </button>
+        {isBuilding && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1 text-[0.62rem] uppercase tracking-[0.16em] font-bold text-mochi-deep">
+            <span className="dot size-1.5 rounded-full bg-mochi-deep" />
+            <span className="dot dot-2 size-1.5 rounded-full bg-mochi-deep" />
+            <span className="dot dot-3 size-1.5 rounded-full bg-mochi-deep" />
+          </div>
+        )}
+        {isError && (
+          <div className="absolute bottom-2 left-1/2 -translate-x-1/2 text-[0.62rem] uppercase tracking-[0.16em] font-bold text-mom">
+            stuck
+          </div>
+        )}
+      </button>
+
+      {/* Visible "more" button — discoverable on every device, doesn't conflict
+          with the tap-to-play action because it sits in its own corner. */}
+      <button
+        onClick={(e) => {
+          e.stopPropagation();
+          onMenu();
+        }}
+        aria-label="More"
+        title="More"
+        className="
+          absolute top-1.5 right-1.5 size-8 rounded-full
+          flex items-center justify-center
+          bg-paper/80 border border-line text-ink-soft
+          hover:bg-cream-deep transition-colors
+          opacity-90 hover:opacity-100
+          focus:outline-none focus:ring-2 focus:ring-mochi-soft
+        "
+      >
+        <MoreHorizontal className="size-4" />
+      </button>
+    </div>
   );
 }
 
@@ -479,11 +545,13 @@ function KidMicOverlay({
   intent,
   onClose,
   onPrompt,
+  onSwitchToType,
 }: {
   lang: SpeechLang;
   intent: "create" | "modify";
   onClose: () => void;
   onPrompt: (text: string) => void;
+  onSwitchToType: (seed?: string) => void;
 }) {
   const speech = useSpeech({
     lang,
@@ -537,17 +605,166 @@ function KidMicOverlay({
         </p>
       )}
 
+      <div className="mt-10 flex items-center gap-3">
+        <button
+          onClick={() => {
+            speech.stop();
+            onSwitchToType(speech.transcript || undefined);
+          }}
+          className="
+            inline-flex items-center gap-2 px-4 py-3 rounded-full
+            bg-paper border border-line text-ink-soft hover:bg-cream-deep
+            transition-colors text-[0.88rem]
+          "
+        >
+          <Keyboard className="size-4" /> Type instead
+        </button>
+        <button
+          onClick={onClose}
+          className="
+            inline-flex items-center justify-center
+            size-12 rounded-full bg-paper border border-line text-ink-soft
+            hover:bg-cream-deep transition-colors
+          "
+          aria-label="Cancel"
+        >
+          <X className="size-5" />
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/* ---------------------------- Type overlay ---------------------------- */
+
+function KidTypeOverlay({
+  intent,
+  target,
+  initial,
+  onClose,
+  onSubmit,
+}: {
+  intent: "create" | "modify";
+  target?: App;
+  initial: string;
+  onClose: () => void;
+  onSubmit: (text: string) => void;
+}) {
+  const [value, setValue] = React.useState(initial);
+  const taRef = React.useRef<HTMLTextAreaElement>(null);
+
+  React.useEffect(() => {
+    taRef.current?.focus();
+  }, []);
+
+  React.useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const submit = () => {
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+  };
+
+  const title =
+    intent === "create"
+      ? "What should Mochi build?"
+      : `Change ${target?.name ?? "the app"}`;
+
+  const placeholder =
+    intent === "create"
+      ? "e.g. a flashcard quiz about animals"
+      : `e.g. make the buttons purple, add a high-score`;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <button
         onClick={onClose}
-        className="
-          mt-10 inline-flex items-center justify-center
-          size-16 rounded-full bg-paper border border-line text-ink-soft
-          hover:bg-cream-deep transition-colors
-        "
-        aria-label="Cancel"
+        aria-label="Close"
+        className="absolute inset-0 bg-ink/40 backdrop-blur-[2px]"
+      />
+      <div
+        className={cn(
+          "relative w-full max-w-xl rounded-3xl bg-paper border border-line",
+          "shadow-[0_24px_60px_-20px_rgba(42,36,33,0.5)]",
+          "p-5 sm:p-6",
+        )}
       >
-        <X className="size-7" />
-      </button>
+        <button
+          onClick={onClose}
+          aria-label="Close"
+          className="absolute top-3 right-3 size-10 rounded-full hover:bg-cream-deep flex items-center justify-center text-ink-soft"
+        >
+          <X className="size-5" />
+        </button>
+
+        <h3
+          className="font-display text-2xl text-ink leading-tight pr-10"
+          style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
+        >
+          {title}
+        </h3>
+        {intent === "modify" && target && (
+          <p className="text-[0.85rem] text-ink-faint italic mt-1">
+            {target.description}
+          </p>
+        )}
+
+        <textarea
+          ref={taRef}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+              e.preventDefault();
+              submit();
+            }
+          }}
+          rows={4}
+          placeholder={placeholder}
+          className="
+            mt-4 w-full rounded-2xl border border-line bg-cream-deep/40
+            px-4 py-3 text-[1rem] text-ink
+            placeholder:text-ink-faint placeholder:italic
+            focus:outline-none focus:ring-4 focus:ring-mochi-soft focus:border-line-strong
+            resize-y min-h-[6rem] max-h-[16rem]
+          "
+        />
+
+        <div className="mt-4 flex items-center gap-2">
+          <button
+            onClick={submit}
+            disabled={!value.trim()}
+            className="
+              flex-1 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
+              bg-mochi-deep text-paper font-semibold
+              shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
+              hover:scale-[1.02] active:scale-95 transition-transform
+              disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:scale-100
+            "
+          >
+            <Sparkles className="size-4" />
+            {intent === "create" ? "Build it" : "Change it"}
+          </button>
+          <button
+            onClick={onClose}
+            className="
+              inline-flex items-center justify-center rounded-2xl px-4 py-3
+              bg-cream-deep border border-line text-ink
+            "
+          >
+            Cancel
+          </button>
+        </div>
+        <p className="text-[0.7rem] text-ink-faint italic mt-2 text-center">
+          ⌘ / Ctrl + Enter to send
+        </p>
+      </div>
     </div>
   );
 }
