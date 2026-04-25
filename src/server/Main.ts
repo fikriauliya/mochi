@@ -1,17 +1,18 @@
 import { BunContext } from "@effect/platform-bun";
 import { Effect, Layer } from "effect";
+import { BuildLive } from "./Build";
 import { ClaudeLive } from "./Claude";
 import { makeRoutes, type MochiServices } from "./HttpApi";
 import { JobsLive } from "./Jobs";
 import { RegistryLive } from "./Registry";
 
-// Registry and Claude are siblings; Jobs consumes both. Then everything is
-// resolved against BunContext (FileSystem, Path, CommandExecutor).
-const RegistryAndClaude = Layer.merge(RegistryLive, ClaudeLive);
+// Registry, Claude, and Build are siblings; Jobs consumes all three. Then
+// everything is resolved against BunContext (FileSystem, Path, CommandExecutor).
+const Siblings = Layer.mergeAll(RegistryLive, ClaudeLive, BuildLive);
 
 /** All services composed into a single Layer for the runtime. */
 export const MainLive = JobsLive.pipe(
-  Layer.provideMerge(RegistryAndClaude),
+  Layer.provideMerge(Siblings),
   Layer.provideMerge(BunContext.layer),
 );
 

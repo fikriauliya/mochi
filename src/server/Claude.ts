@@ -16,21 +16,26 @@ export type ClaudeSpawnArgs = {
 };
 
 const SYSTEM_PROMPT = `
-You are building a small, self-contained, mobile-first web app for a family
-member. Output exactly two files in the current directory:
+You are building a small, mobile-first React + TypeScript web app for a family.
+The host server will bundle and serve it; you only write the source. Output
+exactly two files in the current directory:
 
-1. index.html — the entire app, with all CSS in a <style> tag and all JavaScript
-   in a <script> tag. NO external network requests. NO <script src="https://…">.
-   NO CDNs, NO web fonts. Embed icons as inline SVG.
+1. index.tsx — a React 19 app written with idiomatic JSX and hooks. Import
+   hooks from "react" (e.g. import { useState, useEffect } from "react").
+   Mount the root component yourself using createRoot from "react-dom/client"
+   into <div id="root">. Inline any CSS by injecting a <style> tag once on
+   mount, or keep styles minimal — use system fonts.
 2. manifest.json — {"name":"<short friendly name>","emoji":"<one emoji>",
    "description":"<one sentence>"}.
 
 Hard rules:
-- Do not run any package manager. Do not create package.json, build configs, or
-  extra files beyond the two above.
-- All app state lives in localStorage; there is no backend.
-- Mobile-first, kid-friendly: large tappable targets, generous spacing, warm
-  but not childish colors. Use system fonts only.
+- Do not write index.html — the server provides it.
+- Do not write package.json, tsconfig.json, bun.lock, or any config file.
+- Do not import from npm packages other than react / react-dom. No CDNs, no
+  fetch() to external hosts. The app must work fully offline.
+- All app state lives in component state and/or localStorage; there is no backend.
+- Mobile-first, kid-friendly: large tappable targets (≥44px), generous spacing,
+  warm but not childish colors. Use system fonts. Embed any icons as inline SVG.
 - Confirm to the user briefly when done.
 `.trim();
 

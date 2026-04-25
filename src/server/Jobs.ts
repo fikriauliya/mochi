@@ -11,6 +11,7 @@ import {
   Schema as S,
   Stream,
 } from "effect";
+import { BuildService } from "./Build";
 import { ClaudeService, ClaudeError } from "./Claude";
 import { AppNotFound, RegistryError, RegistryService } from "./Registry";
 import {
@@ -140,6 +141,7 @@ export const JobsLive = Layer.effect(
   Effect.gen(function* () {
     const claude = yield* ClaudeService;
     const registry = yield* RegistryService;
+    const builder = yield* BuildService;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const jobs = yield* Ref.make<ReadonlyMap<string, ActiveJob>>(new Map());
@@ -181,39 +183,55 @@ export const JobsLive = Layer.effect(
           }),
         );
 
-        // Subprocess succeeded → read manifest (only on create; modify keeps prior name)
-        if (kind === "create") {
-          const manifestPath = path.join(cwd, "manifest.json");
-          const text = yield* fs.readFileString(manifestPath).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ClaudeError({
-                  message: "manifest.json missing after build",
-                  cause,
-                }),
-            ),
-          );
-          const json = yield* Effect.try({
-            try: () => JSON.parse(text) as unknown,
-            catch: (cause) =>
-              new ClaudeError({ message: "manifest.json invalid JSON", cause }),
-          });
-          const manifest = yield* decodeManifest(json).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ClaudeError({ message: "manifest.json failed schema", cause }),
-            ),
-          );
-          yield* registry.patch(id, {
-            name: manifest.name,
-            emoji: manifest.emoji,
-            description: manifest.description,
-            status: "ready",
-            lastError: undefined,
-          });
-        } else {
-          yield* registry.patch(id, { status: "ready", lastError: undefined });
-        }
+        // ----- Subprocess succeeded → read manifest -----
+        // We always re-read on modify too, so an agent that updates the
+        // manifest (e.g. picks a better emoji or rename) flows through.
+        const manifestPath = path.join(cwd, "manifest.json");
+        const manifestText = yield* fs.readFileString(manifestPath).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ClaudeError({
+                message:
+                  kind === "create"
+                    ? "manifest.json missing after build"
+                    : "manifest.json missing — was it deleted?",
+                cause,
+              }),
+          ),
+        );
+        const manifestJson = yield* Effect.try({
+          try: () => JSON.parse(manifestText) as unknown,
+          catch: (cause) =>
+            new ClaudeError({
+              message: "manifest.json is not valid JSON",
+              cause,
+            }),
+        });
+        const manifest = yield* decodeManifest(manifestJson).pipe(
+          Effect.mapError(
+            (cause) =>
+              new ClaudeError({
+                message: "manifest.json failed schema",
+                cause,
+              }),
+          ),
+        );
+
+        // ----- Bundle index.tsx -----
+        yield* pubsub.publish({
+          type: "status",
+          message: "Mochi is folding the dough into a bundle…",
+        });
+        yield* builder.bundle(cwd, manifest.name);
+
+        // ----- Persist + announce ready -----
+        yield* registry.patch(id, {
+          name: manifest.name,
+          emoji: manifest.emoji,
+          description: manifest.description,
+          status: "ready",
+          lastError: undefined,
+        });
 
         const done: BuildEvent = { type: "done" };
         yield* Ref.set(terminal, Option.some(done));
@@ -221,11 +239,17 @@ export const JobsLive = Layer.effect(
       }).pipe(
         Effect.catchAll((cause) =>
           Effect.gen(function* () {
-            const message =
-              "message" in (cause as object) ? String((cause as { message: unknown }).message) : "build failed";
-            const ev: BuildEvent = { type: "error", message };
+            const headline =
+              cause && typeof cause === "object" && "message" in cause
+                ? String((cause as { message: unknown }).message)
+                : "build failed";
+            const detail =
+              cause && typeof cause === "object" && "logs" in cause
+                ? `${headline}\n${String((cause as { logs: unknown }).logs ?? "").slice(0, 1500)}`
+                : headline;
+            const ev: BuildEvent = { type: "error", message: detail };
             yield* registry
-              .patch(id, { status: "error", lastError: message })
+              .patch(id, { status: "error", lastError: detail })
               .pipe(Effect.ignore);
             yield* Ref.set(terminal, Option.some(ev));
             yield* pubsub.publish(ev);

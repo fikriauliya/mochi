@@ -1,6 +1,7 @@
 import { Path } from "@effect/platform";
 import { Effect, ParseResult, Runtime, Schema as S, Stream } from "effect";
 import indexHtml from "../index.html";
+import { BuildService } from "./Build";
 import { ClaudeService } from "./Claude";
 import { JobsService } from "./Jobs";
 import { RegistryService } from "./Registry";
@@ -11,6 +12,7 @@ export type MochiServices =
   | RegistryService
   | JobsService
   | ClaudeService
+  | BuildService
   | Path.Path;
 
 const SSE_HEADERS: Record<string, string> = {
