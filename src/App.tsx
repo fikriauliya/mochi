@@ -1,12 +1,6 @@
 import * as React from "react";
-import { ProfileRail } from "./components/ProfileRail";
-import { ChatHeader } from "./components/ChatHeader";
-import { AppLibrary } from "./components/AppLibrary";
-import { BuildView } from "./components/BuildView";
-import { OpenView } from "./components/OpenView";
 import { KidShell } from "./components/KidShell";
-import { createApp, listApps, getApp, modifyApp } from "./lib/api";
-import { useKidMode } from "./lib/kidMode";
+import { createApp, getApp, listApps, modifyApp } from "./lib/api";
 import type { App } from "./lib/types";
 import "./index.css";
 
@@ -34,11 +28,7 @@ export function App() {
     viewFromPath(window.location.pathname),
   );
   const [apps, setApps] = React.useState<App[]>([]);
-  const [appsLoading, setAppsLoading] = React.useState(true);
-  const [railOpen, setRailOpen] = React.useState(false);
-  const [kidMode, setKidMode] = useKidMode();
 
-  // Sync view with the URL on browser back/forward
   React.useEffect(() => {
     const onPop = () => setView(viewFromPath(window.location.pathname));
     window.addEventListener("popstate", onPop);
@@ -53,30 +43,12 @@ export function App() {
     setView(next);
   }, []);
 
-  // Close drawer on Escape and when crossing the md breakpoint upward
-  React.useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setRailOpen(false);
-    };
-    const mq = window.matchMedia("(min-width: 768px)");
-    const onChange = () => mq.matches && setRailOpen(false);
-    window.addEventListener("keydown", onKey);
-    mq.addEventListener("change", onChange);
-    return () => {
-      window.removeEventListener("keydown", onKey);
-      mq.removeEventListener("change", onChange);
-    };
-  }, []);
-
-  // Load apps on mount + after each build/modify completion
   const reload = React.useCallback(async () => {
     try {
       const next = await listApps();
       setApps(next);
     } catch {
-      // ignore — empty state will be shown
-    } finally {
-      setAppsLoading(false);
+      /* ignore */
     }
   }, []);
 
@@ -84,7 +56,12 @@ export function App() {
     reload();
   }, [reload]);
 
-  // Resolve the current app from the loaded list (or fetch if missing)
+  // Refresh the apps list when returning home so deletes/builds reflect.
+  React.useEffect(() => {
+    if (view.kind === "home") reload();
+  }, [view, reload]);
+
+  // Resolve the current app from the cached list, or fetch on miss.
   const [currentApp, setCurrentApp] = React.useState<App | null>(null);
   React.useEffect(() => {
     if (view.kind === "home") {
@@ -124,13 +101,26 @@ export function App() {
     [navigate],
   );
 
+  const onModify = React.useCallback(
+    async (id: string, prompt: string) => {
+      try {
+        const app = await modifyApp(id, { prompt });
+        setApps((cur) => cur.map((a) => (a.id === id ? app : a)));
+        navigate({ kind: "build", appId: id });
+      } catch (e) {
+        console.error("modifyApp failed", e);
+      }
+    },
+    [navigate],
+  );
+
   const onOpenApp = React.useCallback(
     (id: string) => navigate({ kind: "open", appId: id }),
     [navigate],
   );
 
-  const onModifyOpen = React.useCallback(
-    (id: string) => navigate({ kind: "open", appId: id }),
+  const onBackHome = React.useCallback(
+    () => navigate({ kind: "home" }),
     [navigate],
   );
 
@@ -142,87 +132,18 @@ export function App() {
     [navigate, reload],
   );
 
-  const onRetryBuild = React.useCallback(async () => {
-    if (view.kind !== "build" || !currentApp) return;
-    try {
-      const app = await modifyApp(currentApp.id, { prompt: currentApp.prompt });
-      setCurrentApp(app);
-      navigate({ kind: "home" });
-      setTimeout(() => navigate({ kind: "build", appId: app.id }), 50);
-    } catch (e) {
-      console.error("retry failed", e);
-    }
-  }, [view, currentApp, navigate]);
-
-  const onBackHome = React.useCallback(
-    () => navigate({ kind: "home" }),
-    [navigate],
-  );
-
-  // ---- Render ----
-
-  if (kidMode) {
-    return (
-      <KidShell
-        apps={apps}
-        view={view}
-        currentApp={currentApp}
-        onCreate={onCreate}
-        onOpenApp={onOpenApp}
-        onBack={onBackHome}
-        onExitKidMode={() => setKidMode(false)}
-      />
-    );
-  }
-
   return (
-    <div className="h-dvh w-screen flex overflow-hidden">
-      <ProfileRail
-        mobileOpen={railOpen}
-        onMobileClose={() => setRailOpen(false)}
-        apps={apps}
-        onOpenApp={onOpenApp}
-        onNewApp={onBackHome}
-        onEnterKidMode={() => setKidMode(true)}
-      />
-
-      <main className="flex-1 flex flex-col min-w-0 relative">
-        <ChatHeader
-          onClear={onBackHome}
-          hasMessages={view.kind !== "home"}
-          onOpenRail={() => setRailOpen(true)}
-        />
-
-        {view.kind === "home" && (
-          <AppLibrary
-            apps={apps}
-            loading={appsLoading}
-            onCreate={onCreate}
-            onOpen={onOpenApp}
-            onModify={onModifyOpen}
-          />
-        )}
-
-        {view.kind === "build" && currentApp && (
-          <BuildView
-            app={currentApp}
-            onDone={onBuildDone}
-            onBack={onBackHome}
-            onRetry={onRetryBuild}
-          />
-        )}
-
-        {view.kind === "open" && currentApp && (
-          <OpenView app={currentApp} onBack={onBackHome} />
-        )}
-
-        {(view.kind === "build" || view.kind === "open") && !currentApp && (
-          <div className="flex-1 flex items-center justify-center text-ink-faint italic">
-            Loading…
-          </div>
-        )}
-      </main>
-    </div>
+    <KidShell
+      apps={apps}
+      view={view}
+      currentApp={currentApp}
+      onCreate={onCreate}
+      onModify={onModify}
+      onOpenApp={onOpenApp}
+      onBack={onBackHome}
+      onReload={reload}
+      onBuildDone={onBuildDone}
+    />
   );
 }
 
