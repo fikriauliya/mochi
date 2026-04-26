@@ -56,6 +56,20 @@ async function readErrorBody(res: Response): Promise<string> {
   }
 }
 
+/**
+ * Browser sends BCP-47 (`id-ID`, `en-US`); ElevenLabs Scribe wants
+ * ISO 639-3 (`ind`, `eng`). Anything we don't recognise falls through
+ * as undefined → Scribe auto-detects, which is robust for mixed-language
+ * prompts ("buatkan animal quiz").
+ */
+function bcp47ToScribe(lang: string | undefined): string | undefined {
+  if (!lang) return undefined;
+  const head = lang.split("-")[0]?.toLowerCase() ?? "";
+  if (head === "id") return "ind";
+  if (head === "en") return "eng";
+  return undefined;
+}
+
 export const VoiceLive = Layer.succeed(
   VoiceService,
   VoiceService.of({
@@ -78,7 +92,8 @@ export const VoiceLive = Layer.succeed(
           "audio",
         );
         form.append("model_id", process.env["MOCHI_STT_MODEL"] ?? DEFAULT_STT_MODEL);
-        if (lang) form.append("language_code", lang);
+        const scribeLang = bcp47ToScribe(lang);
+        if (scribeLang) form.append("language_code", scribeLang);
 
         const res = yield* Effect.tryPromise({
           try: () =>
