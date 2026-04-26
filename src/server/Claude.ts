@@ -136,15 +136,26 @@ export const ClaudeLive = Layer.effect(
             "bypassPermissions",
             "--verbose",
             // Token-efficiency: the agent only needs to read existing files
-            // and write index.tsx + manifest.json. Stripping every other tool
-            // saves a lot of system-prompt overhead per call.
+            // and write index.tsx + manifest.json. `--tools` restricts the
+            // built-in set, but it does NOT prevent MCP-served tools or
+            // plugin-injected tools from showing up — those slip in via the
+            // user's settings.json (Figma/Gmail/Calendar/Drive/Playwright/
+            // gopls/rust-analyzer plugins, etc.). The combined flags below
+            // strip the agent's tool list down to just Read/Write/Edit:
+            //   --tools                 — narrow the built-ins
+            //   --strict-mcp-config +   — ignore every MCP source other
+            //   --mcp-config '{}'         than this empty one
+            //   --disable-slash-commands — skip skills (no /skill resolution)
+            //   --setting-sources ""    — don't load user/project/local
+            //                             plugins or agent definitions
             "--tools",
             "Write,Edit,Read",
-            // No skills, no project/local settings — we don't use them, and
-            // they'd add tokens + side-effects we don't want.
+            "--strict-mcp-config",
+            "--mcp-config",
+            '{"mcpServers":{}}',
             "--disable-slash-commands",
             "--setting-sources",
-            "user",
+            "",
             // Move per-machine sections (cwd/env/git status) out of the cached
             // system prompt so the static prefix is reused across builds.
             "--exclude-dynamic-system-prompt-sections",
