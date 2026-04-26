@@ -81,6 +81,31 @@ tasks:
     cmds:
       - tail -f /tmp/mochi.log
 
+  # -------------- https via tailscale serve --------------
+  # Exposes the local PORT over real Let's Encrypt HTTPS at
+  # https://<machine>.<tailnet>.ts.net — only reachable from devices
+  # signed in to the same tailnet. Traffic stays peer-to-peer over
+  # WireGuard, so it's effectively still LAN. Both Mac and the target
+  # device (iPad, phone) need the Tailscale app + same login. Enable
+  # "HTTPS Certificates" once in https://login.tailscale.com/admin/dns.
+
+  https:start:
+    desc: 'Map https://<this-machine>.<tailnet>.ts.net → http://localhost:{{ .PORT }}'
+    cmds:
+      - tailscale serve --bg --https=443 http://localhost:{{ .PORT }}
+      - tailscale serve status
+
+  https:stop:
+    desc: Clear all tailscale serve mappings
+    cmds:
+      - tailscale serve reset
+      - 'echo "tailscale serve cleared"'
+
+  https:status:
+    desc: Show current tailscale serve config + the public URL
+    cmds:
+      - tailscale serve status
+
   # -------------- adb / device --------------
 
   adb:devices:
