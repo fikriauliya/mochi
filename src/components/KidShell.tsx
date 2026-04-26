@@ -25,7 +25,7 @@ import {
   type SpeechLang,
   useSpeechLang,
 } from "@/lib/speech";
-import { deleteApp, setFavorite, subscribeStream } from "@/lib/api";
+import { deleteApp, getApp, setFavorite, subscribeStream } from "@/lib/api";
 import type { App, AppKind, BuildEvent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -1003,6 +1003,54 @@ function KidTypeOverlay({
 
 /* -------------------------------- Build -------------------------------- */
 
+function truncatePrompt(s: string, n: number): string {
+  if (s.length <= n) return s;
+  return s.slice(0, n - 1).trim() + "…";
+}
+
+/**
+ * Foreshadow the result. While cooking, shows the user's prompt in a
+ * dashed-border placeholder; on `done`, swaps to the final emoji + name
+ * with a one-shot pop. Lives between the headline and the "Watch Mochi
+ * work" panel — gives the kid something to anticipate during the long
+ * claude-is-thinking gaps.
+ */
+function ResultTile({
+  app,
+  ready,
+  fallbackLabel,
+}: {
+  app: App;
+  ready: boolean;
+  fallbackLabel: string;
+}) {
+  return (
+    <div
+      key={ready ? "ready" : "cooking"}
+      className={cn(
+        "flex flex-col items-center justify-center gap-3 rounded-3xl px-6 py-5",
+        "w-44 sm:w-52 2xl:w-60 min-h-[12rem] sm:min-h-[14rem]",
+        "transition-[border,background,box-shadow] duration-500",
+        ready
+          ? "tile-pop border-2 border-mochi-deep bg-paper shadow-[0_12px_32px_-12px_rgba(224,114,107,0.55)]"
+          : "border-2 border-dashed border-line bg-cream-deep/40",
+      )}
+    >
+      <span className="text-5xl sm:text-6xl 2xl:text-7xl">
+        {ready ? app.emoji : "🍡"}
+      </span>
+      <span
+        className={cn(
+          "text-sm sm:text-base 2xl:text-lg text-center font-bold leading-snug line-clamp-2",
+          ready ? "text-ink" : "text-ink-faint italic font-medium",
+        )}
+      >
+        {ready ? app.name : fallbackLabel}
+      </span>
+    </div>
+  );
+}
+
 function KidBuildView({
   app,
   onBack,
@@ -1021,6 +1069,16 @@ function KidBuildView({
   const [events, setEvents] = React.useState<BuildEvent[]>([]);
   const [errorMessage, setErrorMessage] = React.useState<string>(app.lastError ?? "");
   const [showLog, setShowLog] = React.useState(false);
+  // Bubbles rising out of Mochi's "pot", one per claude tool event. Each
+  // is its own DOM node with a unique key + a short-lived CSS animation;
+  // the cull effect below trims oldest as new ones arrive so the list
+  // stays bounded across long builds.
+  const [bubbles, setBubbles] = React.useState<
+    ReadonlyArray<{ id: string; left: number }>
+  >([]);
+  // Refreshed manifest fields (name + emoji) after `done` lands; lets the
+  // result-tile populate before the auto-redirect.
+  const [resolved, setResolved] = React.useState<App | null>(null);
 
   React.useEffect(() => {
     if (phase !== "cooking") return;
@@ -1028,18 +1086,40 @@ function KidBuildView({
       setEvents((prev) => [...prev, ev]);
       if (ev.type === "done") {
         setPhase("done");
+        getApp(app.id)
+          .then(setResolved)
+          .catch(() => {
+            /* fall back to the stale prop */
+          });
       } else if (ev.type === "error") {
         setPhase("error");
         setErrorMessage(ev.message);
+      } else if (ev.type === "tool") {
+        setBubbles((bs) => [
+          ...bs.slice(-5),
+          { id: crypto.randomUUID(), left: 32 + Math.random() * 36 },
+        ]);
       }
     });
     return unsub;
   }, [app.id, phase]);
 
-  // Auto-navigate forward when the build finishes successfully.
+  // Cull oldest bubble after its animation finishes (matches the 1.6s
+  // `bubble-rise` keyframe in index.css).
+  React.useEffect(() => {
+    if (bubbles.length === 0) return;
+    const t = setTimeout(() => {
+      setBubbles((bs) => (bs.length > 0 ? bs.slice(1) : bs));
+    }, 1600);
+    return () => clearTimeout(t);
+  }, [bubbles]);
+
+  // Auto-navigate forward when the build finishes successfully. Bumped
+  // from 700ms → 1200ms so the result-tile's reveal pop has a moment to
+  // land before the iframe takes over.
   React.useEffect(() => {
     if (phase !== "done") return;
-    const t = setTimeout(() => onDone(app.id), 700);
+    const t = setTimeout(() => onDone(app.id), 1200);
     return () => clearTimeout(t);
   }, [phase, app.id, onDone]);
 
@@ -1068,7 +1148,20 @@ function KidBuildView({
         <ArrowLeft className="size-4" /> Home
       </button>
 
-      <Mochi typing={phase === "cooking"} happy={phase === "done"} size={200} />
+      <div className="relative">
+        <Mochi typing={phase === "cooking"} happy={phase === "done"} size={200} />
+        {phase === "cooking" && bubbles.length > 0 && (
+          <div className="absolute inset-x-0 bottom-2 h-32 pointer-events-none overflow-visible">
+            {bubbles.map((b) => (
+              <span
+                key={b.id}
+                className="bubble absolute bottom-0 size-3 rounded-full bg-mochi-deep/45"
+                style={{ left: `${b.left}%` }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
       <h2
         className={cn(
           "font-display text-3xl sm:text-5xl lg:text-6xl 2xl:text-7xl text-center leading-tight max-w-3xl 2xl:max-w-5xl",
@@ -1078,6 +1171,14 @@ function KidBuildView({
       >
         {headline}
       </h2>
+
+      {phase !== "error" && (
+        <ResultTile
+          app={resolved ?? app}
+          ready={phase === "done"}
+          fallbackLabel={truncatePrompt(app.prompt, 50)}
+        />
+      )}
 
       {phase === "error" && (
         <div className="w-full max-w-xl 2xl:max-w-2xl rounded-3xl border border-mom/30 bg-mom-soft/40 p-5">
