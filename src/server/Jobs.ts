@@ -13,6 +13,7 @@ import {
 } from "effect";
 import { BuildService } from "./Build";
 import { ClaudeService, ClaudeError } from "./Claude";
+import { computeCost, formatCost, type Usage } from "./Pricing";
 import { AppNotFound, RegistryError, RegistryService } from "./Registry";
 import {
   type BuildEvent,
@@ -192,10 +193,12 @@ export const JobsLive = Layer.effect(
         // full JSON for debug/verbose mode, then publish the projected
         // kid-friendly event if the projector recognised it. We also
         // record TTFT and per-tool timings into the server log for
-        // post-hoc analysis of slow builds.
+        // post-hoc analysis of slow builds, and surface API cost from
+        // the terminal `result` event.
         let firstEventAt: number | null = null;
         let lastToolStartAt: number | null = null;
         let lastToolName: string | null = null;
+        let currentModel = "";
         yield* stream.pipe(
           Stream.runForEach((raw) =>
             Effect.gen(function* () {
@@ -209,6 +212,36 @@ export const JobsLive = Layer.effect(
                 });
               }
               yield* publish({ type: "raw", json: JSON.stringify(raw) });
+
+              // Capture the model id from the system/init preamble so we
+              // can price the result event when it arrives. Some claude
+              // versions also stamp `model` directly on the result.
+              const rawType = raw["type"];
+              const rawSubtype = raw["subtype"];
+              if (rawType === "system" && rawSubtype === "init") {
+                const m = raw["model"];
+                if (typeof m === "string") currentModel = m;
+              }
+              if (rawType === "result") {
+                const fallbackModel =
+                  typeof raw["model"] === "string"
+                    ? (raw["model"] as string)
+                    : currentModel;
+                const usage = raw["usage"] as Usage | undefined;
+                if (usage && fallbackModel) {
+                  const cost = computeCost(fallbackModel, usage);
+                  if (cost) {
+                    const line = formatCost(cost);
+                    yield* Effect.log(`[build ${id}] ${line}`);
+                    yield* publish({ type: "status", message: line });
+                  } else {
+                    yield* Effect.log(
+                      `[build ${id}] cost: unknown rates for model ${fallbackModel}`,
+                    );
+                  }
+                }
+              }
+
               const ev = projectClaudeEvent(raw);
               if (ev) {
                 if (ev.type === "tool") {
