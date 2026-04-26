@@ -66,6 +66,16 @@ tasks:
       - 'lsof -i :{{ .PORT }} -t 2>/dev/null | xargs -r kill -9 2>/dev/null || true'
       - 'echo "stopped"'
 
+  serve:prod:
+    desc: 'Start the server in production mode (NODE_ENV=production, no HMR; faster cold loads)'
+    cmds:
+      - 'lsof -i :{{ .PORT }} -t 2>/dev/null | xargs -r kill -9 2>/dev/null || true'
+      - sleep 1
+      - 'NODE_ENV=production nohup bun src/index.ts > /tmp/mochi.log 2>&1 &'
+      - sleep 2
+      - 'curl -sS -o /dev/null -w "http :{{ .PORT }} → %{http_code}\n" http://localhost:{{ .PORT }}/'
+      - 'echo "Reachable on the LAN at http://$(ipconfig getifaddr en0 || ipconfig getifaddr en1):{{ .PORT }}"'
+
   serve:log:
     desc: Tail the background server log
     cmds:
