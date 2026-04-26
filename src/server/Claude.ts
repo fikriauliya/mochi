@@ -110,6 +110,19 @@ export const ClaudeLive = Layer.effect(
             "--permission-mode",
             "bypassPermissions",
             "--verbose",
+            // Token-efficiency: the agent only needs to read existing files
+            // and write index.tsx + manifest.json. Stripping every other tool
+            // saves a lot of system-prompt overhead per call.
+            "--tools",
+            "Write,Edit,Read",
+            // No skills, no project/local settings — we don't use them, and
+            // they'd add tokens + side-effects we don't want.
+            "--disable-slash-commands",
+            "--setting-sources",
+            "user",
+            // Move per-machine sections (cwd/env/git status) out of the cached
+            // system prompt so the static prefix is reused across builds.
+            "--exclude-dynamic-system-prompt-sections",
           ];
           if (resume) {
             args.push("--resume", sessionId);
