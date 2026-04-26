@@ -268,11 +268,31 @@ export const JobsLive = Layer.effect(
               ),
             );
 
-          const title = deriveTitle(fullPrompt);
+          // Generate the manifest in English via gpt-4o-mini. If the call
+          // fails (rate limit, missing key, transient network), fall back to
+          // a server-derived title so the printable still ships — the user
+          // can always rename later.
+          yield* publish({
+            type: "status",
+            message: "Naming your printable…",
+          });
+          const manifest = yield* printable.generateMetadata(fullPrompt).pipe(
+            Effect.tapError((cause) =>
+              Effect.logWarning(
+                `[build ${id}] metadata gen failed: ${cause.message} — using derived title`,
+              ),
+            ),
+            Effect.orElseSucceed(() => ({
+              name: deriveTitle(fullPrompt),
+              emoji: "🖨",
+              description: fullPrompt.slice(0, 280),
+            })),
+          );
+
           yield* fs
             .writeFileString(
               path.join(cwd, "index.html"),
-              printableHtmlTemplate(title),
+              printableHtmlTemplate(manifest.name),
             )
             .pipe(
               Effect.mapError(
@@ -283,12 +303,6 @@ export const JobsLive = Layer.effect(
                   }),
               ),
             );
-
-          const manifest = {
-            name: title,
-            emoji: "🖨",
-            description: fullPrompt.slice(0, 280),
-          };
           yield* fs
             .writeFileString(
               path.join(cwd, "manifest.json"),

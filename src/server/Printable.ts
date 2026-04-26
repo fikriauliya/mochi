@@ -28,6 +28,12 @@ export class PrintableError extends Data.TaggedError("PrintableError")<{
   readonly cause?: unknown;
 }> {}
 
+export type PrintableMetadata = {
+  readonly name: string;
+  readonly emoji: string;
+  readonly description: string;
+};
+
 export class PrintableService extends Context.Tag("PrintableService")<
   PrintableService,
   {
@@ -38,10 +44,31 @@ export class PrintableService extends Context.Tag("PrintableService")<
     readonly generatePng: (
       prompt: string,
     ) => Effect.Effect<Uint8Array, PrintableError>;
+
+    /**
+     * Translate any-language prompt into an English {name, emoji, description}
+     * via gpt-4o-mini chat completion (cheap, ~$0.0001/call). Used both for
+     * new printable manifests and for retitling existing rows in bulk.
+     */
+    readonly generateMetadata: (
+      prompt: string,
+    ) => Effect.Effect<PrintableMetadata, PrintableError>;
   }
 >() {}
 
-const OPENAI_URL = "https://api.openai.com/v1/images/generations";
+const OPENAI_IMAGES_URL = "https://api.openai.com/v1/images/generations";
+const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+
+const METADATA_SYSTEM_PROMPT = `You generate manifest metadata for a family printable infographic.
+
+Respond with a single JSON object, no markdown, no commentary:
+{
+  "name": "<English title in Title Case, ≤60 chars>",
+  "emoji": "<one emoji that fits the topic>",
+  "description": "<English description, ≤120 chars, what the printable shows>"
+}
+
+Translate from any language into English. Do not echo the user's words verbatim — convey the *intent* in natural English. Output JSON only.`;
 
 /**
  * Wraps the user's prompt with infographic-specific framing. We bias the
@@ -97,7 +124,7 @@ export const PrintableLive = Layer.succeed(
 
         const res = yield* Effect.tryPromise({
           try: () =>
-            fetch(OPENAI_URL, {
+            fetch(OPENAI_IMAGES_URL, {
               method: "POST",
               headers: {
                 "content-type": "application/json",
@@ -146,6 +173,109 @@ export const PrintableLive = Layer.succeed(
         }
 
         return decodeBase64(b64);
+      }),
+
+    generateMetadata: (prompt) =>
+      Effect.gen(function* () {
+        const apiKey = process.env["OPENAI_API_KEY"];
+        if (!apiKey) {
+          return yield* Effect.fail(
+            new PrintableError({
+              message: "OPENAI_API_KEY is not set",
+            }),
+          );
+        }
+
+        const res = yield* Effect.tryPromise({
+          try: () =>
+            fetch(OPENAI_CHAT_URL, {
+              method: "POST",
+              headers: {
+                "content-type": "application/json",
+                authorization: `Bearer ${apiKey}`,
+              },
+              body: JSON.stringify({
+                model: "gpt-4o-mini",
+                response_format: { type: "json_object" },
+                max_tokens: 200,
+                temperature: 0.4,
+                messages: [
+                  { role: "system", content: METADATA_SYSTEM_PROMPT },
+                  { role: "user", content: prompt },
+                ],
+              }),
+            }),
+          catch: (cause) =>
+            new PrintableError({
+              message: "metadata: network error calling OpenAI",
+              cause,
+            }),
+        });
+
+        if (!res.ok) {
+          const text = yield* Effect.tryPromise({
+            try: () => res.text(),
+            catch: () => null,
+          }).pipe(Effect.catchAll(() => Effect.succeed("")));
+          return yield* Effect.fail(
+            new PrintableError({
+              message: `metadata: OpenAI ${res.status}: ${text.slice(0, 300)}`,
+            }),
+          );
+        }
+
+        const json = yield* Effect.tryPromise({
+          try: () =>
+            res.json() as Promise<{
+              choices?: Array<{ message?: { content?: string } }>;
+            }>,
+          catch: (cause) =>
+            new PrintableError({
+              message: "metadata: response was not JSON",
+              cause,
+            }),
+        });
+
+        const content = json.choices?.[0]?.message?.content;
+        if (!content) {
+          return yield* Effect.fail(
+            new PrintableError({ message: "metadata: empty response" }),
+          );
+        }
+
+        const parsed = yield* Effect.try({
+          try: () =>
+            JSON.parse(content) as {
+              name?: unknown;
+              emoji?: unknown;
+              description?: unknown;
+            },
+          catch: (cause) =>
+            new PrintableError({
+              message: "metadata: response.content not JSON",
+              cause,
+            }),
+        });
+
+        const name = typeof parsed.name === "string" ? parsed.name.trim() : "";
+        const emoji =
+          typeof parsed.emoji === "string" ? parsed.emoji.trim() : "";
+        const description =
+          typeof parsed.description === "string"
+            ? parsed.description.trim()
+            : "";
+        if (!name || !emoji) {
+          return yield* Effect.fail(
+            new PrintableError({
+              message: `metadata: missing name/emoji (got ${JSON.stringify({ name, emoji }).slice(0, 200)})`,
+            }),
+          );
+        }
+        return {
+          name: name.slice(0, 60),
+          emoji: emoji.slice(0, 8),
+          description: description.slice(0, 280),
+        };
       }),
   }),
 );

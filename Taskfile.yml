@@ -214,6 +214,15 @@ tasks:
       - 'touch apps/.gitkeep'
       - 'echo "wiped — restart the server to start with a fresh DB"'
 
+  apps:retitle-en:
+    desc: 'Translate every app/printable name+emoji+description to English via gpt-4o-mini. Pass DRY=1 to preview, ONLY=<id> to target one row.'
+    cmds:
+      - |
+        FLAGS=""
+        if [ "{{ .DRY }}" = "1" ]; then FLAGS="$FLAGS --dry-run"; fi
+        if [ -n "{{ .ONLY }}" ]; then FLAGS="$FLAGS --only={{ .ONLY }}"; fi
+        bun scripts/retitle-en.ts $FLAGS
+
   apps:upgrade-tv:
     desc: 'Bulk-modify every "ready" app with a fixed TV/tablet-friendly prompt.'
     prompt: 'This will run claude --resume on every ready app. Costs claude credits per app. Continue?'

@@ -22,6 +22,12 @@ const StubPrintableLive = Layer.succeed(
           message: "PrintableService is not exercised in this test",
         }),
       ),
+    generateMetadata: () =>
+      Effect.fail(
+        new PrintableError({
+          message: "PrintableService is not exercised in this test",
+        }),
+      ),
   }),
 );
 
