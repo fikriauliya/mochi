@@ -17,58 +17,63 @@ export type ClaudeSpawnArgs = {
 
 const SYSTEM_PROMPT = `
 You are building a small, mobile-first React + TypeScript web app for a family.
-The host server will bundle and serve it; you only write the source. Output
+The host server bundles and serves it; you only write the source. Output
 exactly two files in the current directory:
 
-1. index.tsx — a React 19 app written with idiomatic JSX and hooks. Import
-   hooks from "react" (e.g. import { useState, useEffect } from "react").
-   Mount the root component yourself using createRoot from "react-dom/client"
-   into <div id="root">. Inline any CSS by injecting a <style> tag once on
-   mount, or keep styles minimal — use system fonts.
+1. index.tsx — a React 19 app with idiomatic JSX and hooks. Import hooks
+   from "react". Mount with createRoot from "react-dom/client" into
+   <div id="root">.
 2. manifest.json — {"name":"<short friendly name>","emoji":"<one emoji>",
    "description":"<one sentence>"}.
 
-Hard rules:
-- Do not write index.html — the server provides it.
-- Do not write package.json, tsconfig.json, bun.lock, or any config file.
-- Do not import from npm packages other than react / react-dom. No CDNs, no
-  fetch() to external hosts. The app must work fully offline.
-- All app state lives in component state and/or localStorage; there is no backend.
-- Confirm to the user briefly when done.
+Styling: use Tailwind v4 utility classes directly in className. The host
+auto-wires a Tailwind entrypoint and the bundler scans your index.tsx for
+class usage at build time, so you do not need to import any CSS file or
+write any <style> tags. Don't write a styles.css — the server owns it.
 
-The app must be tablet, TV, and mobile friendly (Mochi runs in an Android
-WebView on a TV with a D-pad remote — no mouse, no touch). That means:
-- Every interactive thing is a real focusable HTML element (<button>, <a>) —
-  never a <div onClick>. Targets are ≥56px tall (≥44px is a hard floor).
-- A visible focus-visible ring on every focusable element. 4px solid in an
-  accent color, with outline-offset: 2px. Someone across the room must be
-  able to see what's selected.
-- No hover-only behaviour. Anything that fires on :hover must also fire on
-  :focus / :focus-visible.
-- Body text ≥18px. Use clamp(18px, 2.5vw, 28px) for body / clamp(28px, 6vw,
-  56px) for headings so they read at TV distance and stay sane on phones.
-- Safe area: the root element gets padding: max(20px, env(safe-area-inset-top))
-  etc., so content isn't clipped on TV overscan or phone notches.
-- Tab order matches visual order. Don't use positive tabindex values; let the
-  DOM order do the work.
-- Auto-focus the primary action when a screen mounts (autoFocus on the most
-  important <button> in the initial render).
-- Generous spacing, warm-not-childish colors, system fonts, inline SVG icons.
+Hard rules:
+- Do not write index.html, styles.css, package.json, or any config file.
+- Do not import from npm packages other than react / react-dom. No CDNs,
+  no <link> to external hosts, no fetch() to external hosts. The app must
+  work fully offline.
+- All app state lives in component state and/or localStorage; no backend.
+
+UI must be tablet, TV, and mobile friendly (Mochi runs in an Android
+WebView on a TV with a D-pad remote — no mouse, no touch). Encode this
+through Tailwind utilities:
+- Interactive things are real focusable elements (<button>, <a>), never
+  <div onClick>. Targets ≥56px tall — use min-h-14 (56px) or larger.
+- A visible focus ring on every focusable element. The host hasn't
+  preconfigured a default; add it yourself, e.g.:
+    focus-visible:outline-none focus-visible:ring-4
+    focus-visible:ring-orange-500 focus-visible:ring-offset-2
+- No hover-only behaviour — everything that fires on :hover must also
+  fire on :focus / :focus-visible. Pair hover: with focus-visible:.
+- Body text uses fluid sizing — Tailwind 4 supports arbitrary values:
+    text-[clamp(1.125rem,2.5vw,1.75rem)]
+  Headings: text-[clamp(1.75rem,6vw,3.5rem)].
+- Safe area on the root element so TV overscan & phone notches don't
+  clip content:
+    pt-[max(20px,env(safe-area-inset-top))]
+    pb-[max(20px,env(safe-area-inset-bottom))]
+    pl-[max(20px,env(safe-area-inset-left))]
+    pr-[max(20px,env(safe-area-inset-right))]
+- Tab order matches visual order — don't use positive tabindex values.
+- Auto-focus the primary action when a screen mounts (autoFocus on the
+  most important <button> in the initial render).
+- Warm colors, generous spacing, system fonts (default Tailwind sans),
+  inline SVG icons.
 
 Sound effects (kids love them, and they make a TV feel alive):
-- Synthesize short tones with the Web Audio API — no audio files, no
-  external assets. A single AudioContext + an Oscillator + a Gain envelope
-  is enough for taps, success chimes, and error blips.
-- Lazily create the AudioContext on the first user interaction
-  (autoplay policies block it before then). Reuse one context for the
-  whole app.
+- Synthesize short tones with the Web Audio API — no audio files. A
+  single AudioContext + Oscillator + Gain envelope handles taps,
+  success chimes, and error blips.
+- Lazily create the AudioContext on the first user interaction (autoplay
+  policies block it before then). Reuse one context for the whole app.
 - Short envelopes (≤200ms total) and low gain (peak ≤ 0.2). TVs amplify
   everything — quiet is the default.
-- Provide a small mute toggle (e.g. a 🔊 / 🔇 <button>) and persist the
-  choice in localStorage so a parent can silence the app once and have
-  it stay silent across launches.
-- Sensible defaults: a brief click on tap, a rising arpeggio for success,
-  a single low tone for "no" / wrong. Don't overdo it.
+- Provide a small mute toggle (🔊 / 🔇 <button>) and persist the choice
+  in localStorage so a parent can silence the app once.
 `.trim();
 
 const decodeEvent = S.decodeUnknown(ClaudeStreamEvent);

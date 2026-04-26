@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync, existsSync, readFileSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BunContext } from "@effect/platform-bun";
 import { Effect, Exit, Layer } from "effect";
@@ -8,8 +7,11 @@ import { BuildLive, BuildService } from "./Build";
 
 let dir: string;
 
+// Tests need a dir inside the project root so bun-plugin-tailwind can
+// resolve `tailwindcss` from <project>/node_modules. /tmp doesn't see it.
+// `apps/` is gitignored, so `apps/_test-build-*` is a safe drop zone.
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), "mochi-build-"));
+  dir = mkdtempSync(join("apps", "_test-build-"));
 });
 afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
@@ -85,5 +87,46 @@ describe("Build", () => {
     const html = readFileSync(join(dir, "index.html"), "utf8");
     expect(html).not.toContain("<script>alert(1)</script>");
     expect(html).toContain("&lt;script&gt;alert(1)&lt;/script&gt;");
+  });
+
+  test("Tailwind classes used in TSX end up in bundle.css", async () => {
+    writeFileSync(
+      join(dir, "index.tsx"),
+      `
+const root = document.getElementById("root");
+if (root) {
+  root.className = "p-4 bg-orange-500 rounded-lg text-white text-2xl";
+  root.textContent = "hello";
+}
+      `.trim(),
+    );
+    const exit = await provide(
+      Effect.gen(function* () {
+        const b = yield* BuildService;
+        yield* b.bundle(dir, "Tailwind Test");
+      }),
+    );
+    expect(Exit.isSuccess(exit)).toBe(true);
+    expect(existsSync(join(dir, "bundle.css"))).toBe(true);
+    const css = readFileSync(join(dir, "bundle.css"), "utf8");
+    expect(css).toContain(".bg-orange-500");
+    expect(css).toContain(".p-4");
+    expect(css).toContain(".rounded-lg");
+    expect(css).toContain(".text-2xl");
+    // Pre-flight resets ship as part of every Tailwind build
+    expect(css).toContain("box-sizing:border-box");
+  });
+
+  test("auto-creates styles.css if the agent didn't write one", async () => {
+    writeFileSync(join(dir, "index.tsx"), goodTsx);
+    expect(existsSync(join(dir, "styles.css"))).toBe(false);
+    await provide(
+      Effect.gen(function* () {
+        const b = yield* BuildService;
+        yield* b.bundle(dir, "Auto-styles");
+      }),
+    );
+    expect(existsSync(join(dir, "styles.css"))).toBe(true);
+    expect(readFileSync(join(dir, "styles.css"), "utf8")).toContain('@import "tailwindcss"');
   });
 });

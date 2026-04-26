@@ -1,4 +1,5 @@
 import { FileSystem, Path } from "@effect/platform";
+import tailwindPlugin from "bun-plugin-tailwind";
 import { Context, Data, Effect, Layer } from "effect";
 
 export class BuildError extends Data.TaggedError("BuildError")<{
@@ -27,11 +28,7 @@ const indexHtmlTemplate = (title: string) => `<!doctype html>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <title>${escapeHtml(title)}</title>
-  <style>
-    html, body { margin: 0; padding: 0; height: 100%; }
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
-    #root { min-height: 100%; }
-  </style>
+  <link rel="stylesheet" href="./bundle.css" />
 </head>
 <body>
   <div id="root"></div>
@@ -39,6 +36,11 @@ const indexHtmlTemplate = (title: string) => `<!doctype html>
 </body>
 </html>
 `;
+
+// Minimal Tailwind entrypoint we drop into every app's cwd before bundling.
+// The agent writes utility classes directly in JSX; bun-plugin-tailwind
+// scans index.tsx during build and only emits the utilities actually used.
+const STYLES_CSS = `@import "tailwindcss";\n`;
 
 function escapeHtml(s: string): string {
   return s
@@ -58,6 +60,7 @@ export const BuildLive = Layer.effect(
       bundle: (cwd, title) =>
         Effect.gen(function* () {
           const entrypoint = path.join(cwd, "index.tsx");
+          const stylesPath = path.join(cwd, "styles.css");
 
           const exists = yield* fs.exists(entrypoint).pipe(
             Effect.mapError(
@@ -73,17 +76,39 @@ export const BuildLive = Layer.effect(
             );
           }
 
+          // Server owns styles.css — drop in a one-line Tailwind entrypoint
+          // unless the agent wrote one (it shouldn't, but tolerate it).
+          const stylesExists = yield* fs.exists(stylesPath).pipe(
+            Effect.mapError(
+              () => new BuildError({ message: "could not stat styles.css" }),
+            ),
+          );
+          if (!stylesExists) {
+            yield* fs.writeFileString(stylesPath, STYLES_CSS).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new BuildError({
+                    message: "failed to seed styles.css",
+                    logs: String(cause),
+                  }),
+              ),
+            );
+          }
+
           const result = yield* Effect.tryPromise({
             try: () =>
               Bun.build({
-                entrypoints: [entrypoint],
+                entrypoints: [entrypoint, stylesPath],
                 outdir: cwd,
                 target: "browser",
                 format: "esm",
-                naming: "[dir]/bundle.js",
+                // Two entrypoints with different extensions both land at
+                // bundle.js / bundle.css.
+                naming: "[dir]/bundle.[ext]",
                 minify: true,
                 sourcemap: "none",
                 splitting: false,
+                plugins: [tailwindPlugin],
                 define: {
                   "process.env.NODE_ENV": JSON.stringify("production"),
                 },
