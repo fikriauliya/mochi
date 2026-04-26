@@ -20,4 +20,5 @@ export type BuildEvent =
   | { type: "tool"; tool: string; summary: string }
   | { type: "tool_result"; tool: string; ok: boolean; summary: string }
   | { type: "done" }
-  | { type: "error"; message: string };
+  | { type: "error"; message: string }
+  | { type: "raw"; json: string };

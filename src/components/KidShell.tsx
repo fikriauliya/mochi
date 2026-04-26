@@ -822,7 +822,15 @@ function KidBuildView({
   );
   const [events, setEvents] = React.useState<BuildEvent[]>([]);
   const [errorMessage, setErrorMessage] = React.useState<string>(app.lastError ?? "");
-  const [showLog, setShowLog] = React.useState(false);
+  const [verbose, setVerbose] = React.useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("mochi:verbose") === "1";
+  });
+  const [showLog, setShowLog] = React.useState<boolean>(verbose);
+  React.useEffect(() => {
+    window.localStorage.setItem("mochi:verbose", verbose ? "1" : "0");
+    if (verbose) setShowLog(true);
+  }, [verbose]);
 
   React.useEffect(() => {
     if (phase !== "cooking") return;
@@ -934,21 +942,37 @@ function KidBuildView({
       )}
 
       {/* Watch Mochi work */}
-      <div className="w-full max-w-xl 2xl:max-w-2xl">
-        <button
-          onClick={() => setShowLog((v) => !v)}
-          className="
-            w-full inline-flex items-center justify-center gap-1.5
-            text-[0.78rem] 2xl:text-[0.92rem] uppercase tracking-[0.16em] text-ink-soft hover:text-ink
-            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft rounded-full py-1
-          "
-        >
-          {showLog ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
-          Watch Mochi work
-        </button>
+      <div className={cn("w-full max-w-xl 2xl:max-w-2xl", verbose && "max-w-3xl 2xl:max-w-5xl")}>
+        <div className="flex items-center justify-center gap-3">
+          <button
+            onClick={() => setShowLog((v) => !v)}
+            className="
+              inline-flex items-center justify-center gap-1.5
+              text-[0.78rem] 2xl:text-[0.92rem] uppercase tracking-[0.16em] text-ink-soft hover:text-ink
+              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft rounded-full py-1 px-2
+            "
+          >
+            {showLog ? <ChevronDown className="size-3.5" /> : <ChevronRight className="size-3.5" />}
+            Watch Mochi work
+          </button>
+          <button
+            onClick={() => setVerbose((v) => !v)}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-full px-3 py-1",
+              "text-[0.7rem] 2xl:text-[0.82rem] uppercase tracking-[0.14em] font-semibold",
+              "focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft",
+              verbose
+                ? "bg-mochi-deep text-paper"
+                : "bg-cream-deep text-ink-soft border border-line hover:text-ink",
+            )}
+            title="Show raw claude stream-json events for debugging"
+          >
+            verbose {verbose ? "on" : "off"}
+          </button>
+        </div>
         {showLog && (
           <div className="mt-3">
-            <AgentLog events={events} />
+            <AgentLog events={events} verbose={verbose} />
           </div>
         )}
       </div>

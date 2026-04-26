@@ -175,12 +175,20 @@ export const JobsLive = Layer.effect(
           prompt,
         });
 
-        // Fanout each projected event
+        // Fanout each event. We always publish a `raw` event with the
+        // full JSON for debug/verbose mode, then publish the projected
+        // kid-friendly event if the projector recognised it.
         yield* stream.pipe(
-          Stream.runForEach((raw) => {
-            const ev = projectClaudeEvent(raw);
-            return ev ? pubsub.publish(ev) : Effect.void;
-          }),
+          Stream.runForEach((raw) =>
+            Effect.gen(function* () {
+              yield* pubsub.publish({
+                type: "raw",
+                json: JSON.stringify(raw),
+              });
+              const ev = projectClaudeEvent(raw);
+              if (ev) yield* pubsub.publish(ev);
+            }),
+          ),
         );
 
         // ----- Subprocess succeeded → read manifest -----

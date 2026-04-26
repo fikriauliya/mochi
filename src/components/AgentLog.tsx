@@ -5,45 +5,49 @@ import { Check, AlertCircle } from "lucide-react";
 
 type Props = {
   events: BuildEvent[];
+  /** When true: don't truncate text events, render `raw` events as JSON. */
+  verbose?: boolean;
 };
 
-export function AgentLog({ events }: Props) {
+export function AgentLog({ events, verbose = false }: Props) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
+
+  // In normal mode, hide raw events entirely so the kid-friendly view
+  // stays uncluttered. In verbose, keep everything in arrival order.
+  const visible = verbose ? events : events.filter((e) => e.type !== "raw");
 
   React.useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [events.length]);
+  }, [visible.length]);
 
   return (
     <div
       ref={scrollRef}
-      className="
-        max-h-[40vh] overflow-y-auto
-        rounded-2xl border border-line bg-cream-deep/50
-        px-4 py-3
-        font-mono text-[0.78rem] leading-relaxed
-        space-y-1
-      "
+      className={cn(
+        "overflow-y-auto rounded-2xl border border-line bg-cream-deep/50 px-4 py-3 font-mono leading-relaxed space-y-1",
+        verbose ? "max-h-[60vh] text-[0.74rem]" : "max-h-[40vh] text-[0.78rem]",
+      )}
     >
-      {events.length === 0 ? (
+      {visible.length === 0 ? (
         <div className="text-ink-faint italic">Waiting for Mochi…</div>
       ) : (
-        events.map((ev, i) => <LogLine key={i} ev={ev} />)
+        visible.map((ev, i) => <LogLine key={i} ev={ev} verbose={verbose} />)
       )}
     </div>
   );
 }
 
-function LogLine({ ev }: { ev: BuildEvent }) {
+function LogLine({ ev, verbose }: { ev: BuildEvent; verbose: boolean }) {
   switch (ev.type) {
     case "status":
       return <div className="text-ink-faint italic">~ {ev.message}</div>;
     case "text":
       return (
         <div className="text-ink whitespace-pre-wrap">
-          <span className="text-mochi-deep">›</span> {truncateLines(ev.text, 6)}
+          <span className="text-mochi-deep">›</span>{" "}
+          {verbose ? ev.text : truncateLines(ev.text, 6)}
         </div>
       );
     case "tool":
@@ -59,7 +63,9 @@ function LogLine({ ev }: { ev: BuildEvent }) {
       return (
         <div className={cn("flex items-start gap-1.5", ev.ok ? "text-dad" : "text-mom")}>
           {ev.ok ? <Check className="size-3.5 mt-0.5 shrink-0" /> : <AlertCircle className="size-3.5 mt-0.5 shrink-0" />}
-          <span className="truncate">{ev.summary || (ev.ok ? "ok" : "failed")}</span>
+          <span className={verbose ? "whitespace-pre-wrap break-all" : "truncate"}>
+            {ev.summary || (ev.ok ? "ok" : "failed")}
+          </span>
         </div>
       );
     case "done":
@@ -75,6 +81,20 @@ function LogLine({ ev }: { ev: BuildEvent }) {
           <span className="whitespace-pre-wrap">{ev.message}</span>
         </div>
       );
+    case "raw":
+      return (
+        <pre className="text-[0.7rem] leading-snug text-ink-faint whitespace-pre-wrap break-all rounded bg-cream/60 px-2 py-1 my-0.5">
+          {prettyJson(ev.json)}
+        </pre>
+      );
+  }
+}
+
+function prettyJson(s: string): string {
+  try {
+    return JSON.stringify(JSON.parse(s), null, 2);
+  } catch {
+    return s;
   }
 }
 
