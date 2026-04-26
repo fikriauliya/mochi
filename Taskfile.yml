@@ -261,3 +261,8 @@ tasks:
     desc: TypeScript type-check (skips agent-generated apps/)
     cmds:
       - bunx tsc --noEmit
+
+  test:
+    desc: Run server-side tests with bun test
+    cmds:
+      - bun test src/server

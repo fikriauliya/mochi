@@ -51,9 +51,9 @@ const nowStatus = (msg: string): BuildEvent => ({ type: "status", message: msg }
 /**
  * Project one raw claude stream-json event into a BuildEvent. The shape varies
  * by claude version; we extract the bits we care about and fall back gracefully
- * for anything else.
+ * for anything else. Exported for unit testing.
  */
-function projectClaudeEvent(raw: ClaudeStreamEvent): BuildEvent | null {
+export function projectClaudeEvent(raw: ClaudeStreamEvent): BuildEvent | null {
   const type = (raw["type"] as string | undefined) ?? "";
   const subtype = (raw["subtype"] as string | undefined) ?? "";
 

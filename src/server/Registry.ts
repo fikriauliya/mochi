@@ -1,4 +1,5 @@
 import { Database } from "bun:sqlite";
+import { dirname } from "node:path";
 import { FileSystem } from "@effect/platform";
 import { Context, Data, Effect, Layer } from "effect";
 import { App, type AppStatus } from "./Schema";
@@ -26,8 +27,7 @@ export class RegistryService extends Context.Tag("RegistryService")<
   }
 >() {}
 
-const DATA_DIR = "data";
-const DB_PATH = `${DATA_DIR}/mochi.db`;
+const DEFAULT_DB_PATH = "data/mochi.db";
 
 const SCHEMA = `
   CREATE TABLE IF NOT EXISTS apps (
@@ -81,18 +81,26 @@ const wrapDb = <A>(work: () => A) =>
       }),
   });
 
-export const RegistryLive = Layer.scoped(
+/**
+ * Build a registry layer backed by a SQLite database at `dbPath`.
+ * Production wires {@link RegistryLive} (data/mochi.db); tests wire a
+ * fresh temp path so they're hermetic.
+ */
+export const makeRegistryLive = (dbPath: string) => Layer.scoped(
   RegistryService,
   Effect.gen(function* () {
     const fs = yield* FileSystem.FileSystem;
-    yield* fs.makeDirectory(DATA_DIR, { recursive: true }).pipe(Effect.ignore);
+    const dir = dirname(dbPath);
+    if (dir && dir !== ".") {
+      yield* fs.makeDirectory(dir, { recursive: true }).pipe(Effect.ignore);
+    }
 
     // Open DB. SQLite handles concurrent reads/writes itself; we don't need
     // a Semaphore or in-memory cache. WAL mode lets readers and writers not
     // block each other.
     const db = yield* Effect.acquireRelease(
       Effect.sync(() => {
-        const d = new Database(DB_PATH, { create: true });
+        const d = new Database(dbPath, { create: true });
         d.exec("PRAGMA journal_mode = WAL");
         d.exec("PRAGMA synchronous = NORMAL");
         d.exec("PRAGMA foreign_keys = ON");
@@ -191,3 +199,5 @@ export const RegistryLive = Layer.scoped(
     });
   }),
 );
+
+export const RegistryLive = makeRegistryLive(DEFAULT_DB_PATH);
