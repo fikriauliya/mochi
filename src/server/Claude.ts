@@ -112,8 +112,15 @@ export const ClaudeLive = Layer.effect(
     return ClaudeService.of({
       spawn: ({ cwd, sessionId, resume, prompt }) =>
         Effect.gen(function* () {
+          // Default to sonnet — ~40% cheaper than opus and noticeably faster
+          // at TTFT on these short, write-heavy prompts. Override with
+          // MOCHI_CLAUDE_MODEL=opus (or a full model id) in .env if you want
+          // higher-quality output for a specific session.
+          const model = process.env["MOCHI_CLAUDE_MODEL"] ?? "sonnet";
           const args = [
             "--print",
+            "--model",
+            model,
             "--output-format",
             "stream-json",
             "--include-partial-messages",
@@ -148,7 +155,7 @@ export const ClaudeLive = Layer.effect(
 
           // Start the process inside its own scope so .stdout / .stderr / .kill
           // are all wired to the same lifetime owned by the caller.
-          const process = yield* executor.start(command).pipe(
+          const child = yield* executor.start(command).pipe(
             Effect.mapError(
               (cause) =>
                 new ClaudeError({
@@ -160,14 +167,14 @@ export const ClaudeLive = Layer.effect(
 
           // Capture stderr into a ref so we can include it in error reports.
           const stderrRef = yield* Ref.make("");
-          yield* Stream.runForEach(process.stderr, (chunk) =>
+          yield* Stream.runForEach(child.stderr, (chunk) =>
             Ref.update(stderrRef, (s) => s + new TextDecoder().decode(chunk)),
           ).pipe(
             Effect.catchAll(() => Effect.void),
             Effect.forkScoped,
           );
 
-          const events: Stream.Stream<ClaudeStreamEvent, ClaudeError> = process.stdout.pipe(
+          const events: Stream.Stream<ClaudeStreamEvent, ClaudeError> = child.stdout.pipe(
             Stream.decodeText("utf8"),
             Stream.splitLines,
             Stream.filter((line) => line.trim().length > 0),
@@ -200,7 +207,7 @@ export const ClaudeLive = Layer.effect(
             Stream.concat(
               Stream.unwrap(
                 Effect.gen(function* () {
-                  const code = yield* process.exitCode.pipe(
+                  const code = yield* child.exitCode.pipe(
                     Effect.mapError(
                       (cause) =>
                         new ClaudeError({
