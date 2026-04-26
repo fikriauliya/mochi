@@ -1,19 +1,29 @@
 import { Context, Data, Effect, Layer } from "effect";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { unwrapStructured } from "./SonnetJson";
 
 /**
  * Reverse-engineer a printed worksheet, coloring page, maze, sticker
  * chart, etc. into a spec for an interactive web-app version. The kid
- * snaps a photo with the host's camera; we hand the image to OpenAI's
- * gpt-4o-mini (vision-capable, cheap) and ask for a small JSON object
- * the build pipeline can consume verbatim.
+ * snaps a photo with the host's camera; we hand the image to claude
+ * (Opus 4.7 by default, vision-capable) via `claude --print` with the
+ * `Read` tool allowed and a JSON schema enforcing the output shape.
  *
- *   POST https://api.openai.com/v1/chat/completions
- *   { model: "gpt-4o-mini", response_format: { type: "json_object" },
- *     messages: [{ role: "user", content: [{ type: "text", … },
- *                                          { type: "image_url", … }] }] }
+ * Why the CLI instead of the Anthropic API: the `claude` CLI is already
+ * authenticated through claude code login, so this works on a fresh
+ * checkout without provisioning ANTHROPIC_API_KEY. Same model, same
+ * vision capability — the trade-off is one extra Read-tool round trip
+ * (≈half a second) for zero env setup.
  *
- * The returned `spec` is fed into the existing /api/apps create flow —
- * the agent treats it like any other prompt, no special casing needed.
+ * The image is staged in a unique temp directory; claude is launched
+ * with that directory as its cwd and instructed to read the file there.
+ * Both the subprocess and the temp dir are scoped via
+ * `Effect.acquireUseRelease`, so they're cleaned up on every exit path.
+ *
+ * Override the model with MOCHI_VISION_MODEL=sonnet (or a full id) if
+ * Opus's pricing or latency is too heavy for a 1MP photo.
  */
 
 export class VisionError extends Data.TaggedError("VisionError")<{
@@ -38,11 +48,23 @@ export class VisionService extends Context.Tag("VisionService")<
   }
 >() {}
 
-const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
+const DEFAULT_MODEL = "opus";
 
-const VISION_PROMPT = `You're looking at a printed worksheet, coloring page, maze, puzzle, sticker chart, or similar that a kid photographed because they want an INTERACTIVE web-app version of it.
+const SCAN_SCHEMA = JSON.stringify({
+  type: "object",
+  additionalProperties: false,
+  required: ["name", "emoji", "description", "spec"],
+  properties: {
+    name: { type: "string", minLength: 1, maxLength: 60 },
+    emoji: { type: "string", minLength: 1, maxLength: 8 },
+    description: { type: "string", maxLength: 280 },
+    spec: { type: "string", minLength: 1 },
+  },
+});
 
-Identify what's on the page (math problems, animal coloring, maze, word search, sticker chart, dot-to-dot, music sheet, recipe, etc), then write a spec for a kid-friendly INTERACTIVE digital version. Translate any non-English text on the worksheet into English in the spec.
+const VISION_PROMPT = `A kid photographed a printed worksheet, coloring page, maze, puzzle, sticker chart, or similar because they want an INTERACTIVE web-app version of it. The image is in your current directory — read it, then describe how to turn it into a kid-friendly digital app.
+
+Translate any non-English text on the worksheet into English in the spec.
 
 Output JSON exactly:
 {
@@ -64,122 +86,149 @@ Examples:
 - Maze → drag a finger through; wall layout matches the photo.
 - Daily-tasks sticker chart → digital chart with the same row labels; tap a cell to add a sticker; resets weekly.`;
 
-function toDataUrl(image: Uint8Array, mimeType: string): string {
-  // bigger images blow the prompt size budget; gpt-4o-mini happily reads
-  // ~1MP photos, so a phone capture downscaled to ~1024px is plenty.
-  // We trust the client to send a reasonable jpeg already.
-  const b64 = Buffer.from(image).toString("base64");
-  return `data:${mimeType};base64,${b64}`;
+function extFromMime(mime: string): string {
+  if (mime.includes("png")) return "png";
+  if (mime.includes("webp")) return "webp";
+  if (mime.includes("gif")) return "gif";
+  return "jpg";
+}
+
+function readField(rec: Record<string, unknown>, key: string): string {
+  const v = rec[key];
+  return typeof v === "string" ? v.trim() : "";
 }
 
 export const VisionLive = Layer.succeed(
   VisionService,
   VisionService.of({
     scanWorksheet: (image, mimeType) =>
-      Effect.gen(function* () {
-        const apiKey = process.env["OPENAI_API_KEY"];
-        if (!apiKey) {
-          return yield* Effect.fail(
-            new VisionError({ message: "OPENAI_API_KEY is not set" }),
-          );
-        }
+      Effect.acquireUseRelease(
+        Effect.sync(() => {
+          const dir = mkdtempSync(join(tmpdir(), "mochi-scan-"));
+          const filename = `worksheet.${extFromMime(mimeType)}`;
+          writeFileSync(join(dir, filename), image);
+          return { dir, filename };
+        }),
+        ({ dir, filename }) =>
+          Effect.gen(function* () {
+            const model =
+              process.env["MOCHI_VISION_MODEL"] ?? DEFAULT_MODEL;
+            const t0 = Date.now();
 
-        const t0 = Date.now();
-        const res = yield* Effect.tryPromise({
-          try: () =>
-            fetch(OPENAI_CHAT_URL, {
-              method: "POST",
-              headers: {
-                "content-type": "application/json",
-                authorization: `Bearer ${apiKey}`,
-              },
-              body: JSON.stringify({
-                model: "gpt-4o-mini",
-                response_format: { type: "json_object" },
-                max_tokens: 600,
-                temperature: 0.4,
-                messages: [
-                  {
-                    role: "user",
-                    content: [
-                      { type: "text", text: VISION_PROMPT },
-                      {
-                        type: "image_url",
-                        image_url: { url: toDataUrl(image, mimeType) },
-                      },
-                    ],
+            const stdout = yield* Effect.acquireUseRelease(
+              Effect.sync(() =>
+                Bun.spawn(
+                  [
+                    "claude",
+                    "--print",
+                    "--model",
+                    model,
+                    "--effort",
+                    "low",
+                    "--output-format",
+                    "json",
+                    "--json-schema",
+                    SCAN_SCHEMA,
+                    "--permission-mode",
+                    "bypassPermissions",
+                    // Just Read — claude reads the image file we staged
+                    // in cwd. `--strict-mcp-config` (boolean) terminates
+                    // the variadic `--tools` so the prompt isn't slurped.
+                    "--tools",
+                    "Read",
+                    "--strict-mcp-config",
+                    "--mcp-config",
+                    '{"mcpServers":{}}',
+                    "--disable-slash-commands",
+                    "--setting-sources",
+                    "",
+                    "--exclude-dynamic-system-prompt-sections",
+                    `${VISION_PROMPT}\n\n(The image to read is ./${filename} in your current directory.)`,
+                  ],
+                  { cwd: dir, stdout: "pipe", stderr: "pipe" },
+                ),
+              ),
+              (proc) =>
+                Effect.tryPromise({
+                  try: async () => {
+                    const out = await new Response(proc.stdout).text();
+                    const code = await proc.exited;
+                    if (code !== 0) {
+                      const err = await new Response(proc.stderr).text();
+                      throw new Error(
+                        `claude exited ${code}: ${err.slice(0, 500)}`,
+                      );
+                    }
+                    return out;
                   },
-                ],
-              }),
-            }),
-          catch: (cause) =>
-            new VisionError({
-              message: "network error calling OpenAI vision",
-              cause,
-            }),
-        });
+                  catch: (cause) =>
+                    new VisionError({
+                      message:
+                        cause instanceof Error
+                          ? cause.message
+                          : String(cause),
+                      cause,
+                    }),
+                }),
+              (proc) =>
+                Effect.sync(() => {
+                  try {
+                    proc.kill();
+                  } catch {
+                    /* already exited */
+                  }
+                }),
+            );
 
-        if (!res.ok) {
-          const body = yield* Effect.promise(() =>
-            res.text().catch(() => ""),
-          );
-          return yield* Effect.fail(
-            new VisionError({
-              message: `vision ${res.status}: ${body.slice(0, 500)}`,
-            }),
-          );
-        }
+            const parsedTop = yield* Effect.try({
+              try: () => JSON.parse(stdout) as unknown,
+              catch: (cause) =>
+                new VisionError({
+                  message: "claude stdout not JSON",
+                  cause,
+                }),
+            });
+            const structured = unwrapStructured(parsedTop);
+            if (!structured) {
+              return yield* Effect.fail(
+                new VisionError({
+                  message: "no structured_output in claude response",
+                }),
+              );
+            }
 
-        const json = yield* Effect.tryPromise({
-          try: () =>
-            res.json() as Promise<{
-              choices?: Array<{ message?: { content?: string } }>;
-            }>,
-          catch: (cause) =>
-            new VisionError({ message: "vision response not JSON", cause }),
-        });
-        const content = json.choices?.[0]?.message?.content ?? "";
-        const parsed = yield* Effect.try({
-          try: () =>
-            JSON.parse(content) as {
-              name?: unknown;
-              emoji?: unknown;
-              description?: unknown;
-              spec?: unknown;
-            },
-          catch: (cause) =>
-            new VisionError({
-              message: "vision JSON inner not parseable",
-              cause,
-            }),
-        });
+            const spec = readField(structured, "spec");
+            if (!spec) {
+              return yield* Effect.fail(
+                new VisionError({ message: "vision returned empty spec" }),
+              );
+            }
 
-        const name =
-          typeof parsed.name === "string" ? parsed.name.trim().slice(0, 60) : "";
-        const emoji =
-          typeof parsed.emoji === "string"
-            ? parsed.emoji.trim().slice(0, 8)
-            : "📋";
-        const description =
-          typeof parsed.description === "string"
-            ? parsed.description.trim().slice(0, 280)
-            : "";
-        const spec =
-          typeof parsed.spec === "string" ? parsed.spec.trim() : "";
-        if (!spec) {
-          return yield* Effect.fail(
-            new VisionError({ message: "vision returned empty spec" }),
-          );
-        }
-        yield* Effect.log(
-          `[vision] ${image.byteLength}B (${mimeType}) → "${name}" in ${Date.now() - t0}ms`,
-        );
-        return {
-          name: name || "Worksheet",
-          emoji: emoji || "📋",
-          description,
-          spec,
-        };
-      }),
+            const name = readField(structured, "name").slice(0, 60);
+            const emoji = readField(structured, "emoji").slice(0, 8);
+            const description = readField(structured, "description").slice(
+              0,
+              280,
+            );
+
+            yield* Effect.log(
+              `[vision] ${image.byteLength}B (${mimeType}) → "${name}" in ${Date.now() - t0}ms · ${model}`,
+            );
+            return {
+              name: name || "Worksheet",
+              emoji: emoji || "📋",
+              description,
+              spec,
+            };
+          }),
+        ({ dir }) =>
+          Effect.sync(() => {
+            try {
+              rmSync(dir, { recursive: true, force: true });
+            } catch {
+              /* best-effort */
+            }
+          }),
+      ),
   }),
 );
