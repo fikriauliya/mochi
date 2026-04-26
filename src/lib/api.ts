@@ -37,8 +37,13 @@ export const listSuggestions = (): Promise<string[]> =>
     .then((r) => asJson<{ suggestions: string[] }>(r))
     .then((d) => d.suggestions);
 
-export const getAgentSignedUrl = (): Promise<string> =>
-  fetch("/api/voice/agent-url", { method: "POST" })
+export const getAgentSignedUrl = (lang: SpeechLang): Promise<string> =>
+  fetch(
+    `/api/voice/agent-url?lang=${encodeURIComponent(
+      lang === "en-US" ? "en" : "id",
+    )}`,
+    { method: "POST" },
+  )
     .then((r) => asJson<{ signedUrl: string }>(r))
     .then((d) => d.signedUrl);
 

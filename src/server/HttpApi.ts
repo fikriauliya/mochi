@@ -416,16 +416,27 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
     "/api/voice/agent-url": {
       // Mint a signed wss:// URL for the kid-PM Conversational AI agent.
       // The agent_id is server-side env so the client can't spin up
-      // arbitrary agents on our key.
-      POST: () =>
+      // arbitrary agents on our key. `?lang=en|id` picks which of the
+      // two provisioned agents to mint a URL for; defaults to `id`
+      // (matches the home chip's default).
+      POST: (req: Request) =>
         runP(
           handle(
             Effect.gen(function* () {
-              const agentId = process.env["MOCHI_PM_AGENT_ID"];
+              const lang = new URL(req.url).searchParams.get("lang") ?? "id";
+              const envVar =
+                lang === "en" ? "MOCHI_PM_AGENT_ID_EN" : "MOCHI_PM_AGENT_ID_ID";
+              const agentId =
+                process.env[envVar] ??
+                // Backwards compat: legacy `MOCHI_PM_AGENT_ID` was the
+                // Indonesian agent before the split.
+                (envVar === "MOCHI_PM_AGENT_ID_ID"
+                  ? process.env["MOCHI_PM_AGENT_ID"]
+                  : undefined);
               if (!agentId) {
                 return errorJson(
                   500,
-                  "MOCHI_PM_AGENT_ID is not set; run `bun src/server/PmAgent.ts` to provision the agent",
+                  `${envVar} is not set; run \`bun src/server/PmAgent.ts\` to provision the agent`,
                 );
               }
               const voice = yield* VoiceService;

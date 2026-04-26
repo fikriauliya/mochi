@@ -86,7 +86,7 @@ export function KidPMOverlay({
     (async () => {
       let signedUrl: string;
       try {
-        signedUrl = await getAgentSignedUrl();
+        signedUrl = await getAgentSignedUrl(lang);
       } catch (err) {
         if (abortController.signal.aborted) return;
         const msg =
