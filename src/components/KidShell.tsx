@@ -1009,6 +1009,50 @@ function truncatePrompt(s: string, n: number): string {
 }
 
 /**
+ * Ring around Mochi that fills with elapsed time. Curve `1 - e^(-t/20)`
+ * means ~63% at 20s, ~86% at 40s, ~95% at 60s — fast initial hook, then
+ * gradually creeping. Caller snaps to 1 on done. Pure visual; we don't
+ * have ground-truth progress from claude, so this is honest about being
+ * an estimate (rate of growth ≠ actual milestones).
+ */
+function ProgressRing({ progress, size }: { progress: number; size: number }) {
+  const stroke = 6;
+  const r = size / 2 - stroke;
+  const c = 2 * Math.PI * r;
+  const offset = c * (1 - Math.max(0, Math.min(1, progress)));
+  return (
+    <svg
+      width={size}
+      height={size}
+      className="absolute inset-0 pointer-events-none -rotate-90"
+      aria-hidden="true"
+    >
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke="var(--color-line)"
+        strokeWidth={stroke}
+        opacity={0.4}
+      />
+      <circle
+        cx={size / 2}
+        cy={size / 2}
+        r={r}
+        fill="none"
+        stroke="var(--color-mochi-deep)"
+        strokeWidth={stroke}
+        strokeLinecap="round"
+        strokeDasharray={c}
+        strokeDashoffset={offset}
+        style={{ transition: "stroke-dashoffset 600ms ease-out" }}
+      />
+    </svg>
+  );
+}
+
+/**
  * Foreshadow the result. While cooking, shows the user's prompt in a
  * dashed-border placeholder; on `done`, swaps to the final emoji + name
  * with a one-shot pop. Lives between the headline and the "Watch Mochi
@@ -1080,6 +1124,9 @@ function KidBuildView({
   // Refreshed manifest fields (name + emoji) after `done` lands; lets the
   // result-tile populate before the auto-redirect.
   const [resolved, setResolved] = React.useState<App | null>(null);
+  // Elapsed-time-driven progress, 0..1. Pure estimate (we don't have
+  // ground truth from claude); snaps to 1 the moment `done` lands.
+  const [progress, setProgress] = React.useState(0);
 
   React.useEffect(() => {
     if (phase !== "cooking") return;
@@ -1111,6 +1158,24 @@ function KidBuildView({
         { id: crypto.randomUUID(), left: 32 + Math.random() * 36 },
       ]);
     }, 800);
+    return () => clearInterval(interval);
+  }, [phase]);
+
+  // Time-based progress curve: 1 - e^(-t/20). Updates every 400ms while
+  // cooking; snaps to 1 on done. Decoupled from tool events so the ring
+  // moves smoothly even during long claude-thinking gaps.
+  React.useEffect(() => {
+    if (phase === "done" || phase === "error") {
+      setProgress(phase === "done" ? 1 : 0);
+      return;
+    }
+    const t0 = Date.now();
+    const tick = () => {
+      const seconds = (Date.now() - t0) / 1000;
+      setProgress(Math.min(0.95, 1 - Math.exp(-seconds / 20)));
+    };
+    tick();
+    const interval = setInterval(tick, 400);
     return () => clearInterval(interval);
   }, [phase]);
 
@@ -1158,10 +1223,13 @@ function KidBuildView({
         <ArrowLeft className="size-4" /> Home
       </button>
 
-      <div className="relative">
-        <Mochi typing={phase === "cooking"} happy={phase === "done"} size={200} />
+      <div className="relative" style={{ width: 240, height: 240 }}>
+        {phase !== "error" && <ProgressRing progress={progress} size={240} />}
+        <div className="absolute inset-0 flex items-center justify-center">
+          <Mochi typing={phase === "cooking"} happy={phase === "done"} size={200} />
+        </div>
         {phase === "cooking" && bubbles.length > 0 && (
-          <div className="absolute inset-x-0 bottom-2 h-32 pointer-events-none overflow-visible">
+          <div className="absolute inset-x-0 bottom-4 h-32 pointer-events-none overflow-visible">
             {bubbles.map((b) => (
               <span
                 key={b.id}
