@@ -1,5 +1,6 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type { AppKind } from "./Schema";
+import { callJsonSchema, unwrapStructured } from "./SonnetJson";
 
 /**
  * Asks claude-sonnet for 5 short prompt ideas the family hasn't built
@@ -82,82 +83,12 @@ function buildPrompt(apps: SuggestInput): string {
 }
 
 function extractSuggestions(parsed: unknown): ReadonlyArray<string> | null {
-  if (!parsed || typeof parsed !== "object") return null;
-  // claude --json-schema lands the validated payload at `.structured_output`.
-  const p = parsed as Record<string, unknown>;
-  const candidates = [p["structured_output"], p["result"], parsed];
-  for (const c of candidates) {
-    if (c && typeof c === "object" && "suggestions" in c) {
-      const s = (c as { suggestions: unknown }).suggestions;
-      if (Array.isArray(s))
-        return s.filter((x): x is string => typeof x === "string" && x.length > 0);
-    }
-  }
-  return null;
-}
-
-/**
- * Effect-wrapped spawn of `claude --print`. acquireUseRelease guarantees
- * the subprocess is killed on interruption, timeout, or failure — without
- * this, a stuck claude leaks past the timeout.
- */
-function callClaude(prompt: string) {
-  return Effect.acquireUseRelease(
-    Effect.sync(() =>
-      Bun.spawn(
-        [
-          "claude",
-          "--print",
-          "--model",
-          "sonnet",
-          "--effort",
-          "low",
-          "--output-format",
-          "json",
-          "--json-schema",
-          RESPONSE_SCHEMA,
-          "--permission-mode",
-          "bypassPermissions",
-          "--tools",
-          "",
-          "--strict-mcp-config",
-          "--mcp-config",
-          '{"mcpServers":{}}',
-          "--disable-slash-commands",
-          "--setting-sources",
-          "",
-          "--exclude-dynamic-system-prompt-sections",
-          prompt,
-        ],
-        { stdout: "pipe", stderr: "pipe" },
-      ),
-    ),
-    (proc) =>
-      Effect.tryPromise({
-        try: async () => {
-          const stdout = await new Response(proc.stdout).text();
-          const code = await proc.exited;
-          if (code !== 0) {
-            const stderr = await new Response(proc.stderr).text();
-            throw new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`);
-          }
-          return stdout;
-        },
-        catch: (cause) =>
-          new SuggestError({
-            message: cause instanceof Error ? cause.message : String(cause),
-            cause,
-          }),
-      }),
-    (proc) =>
-      Effect.sync(() => {
-        try {
-          proc.kill();
-        } catch {
-          /* already exited */
-        }
-      }),
+  const obj = unwrapStructured(parsed);
+  if (!obj || !Array.isArray(obj["suggestions"])) return null;
+  const list = (obj["suggestions"] as ReadonlyArray<unknown>).filter(
+    (x): x is string => typeof x === "string" && x.length > 0,
   );
+  return list.length > 0 ? list : null;
 }
 
 export const SuggestLive = Layer.succeed(
@@ -166,19 +97,19 @@ export const SuggestLive = Layer.succeed(
     suggest: (apps) =>
       Effect.gen(function* () {
         const t0 = Date.now();
-        const stdout = yield* callClaude(buildPrompt(apps)).pipe(
+        const parsed = yield* callJsonSchema({
+          prompt: buildPrompt(apps),
+          schema: RESPONSE_SCHEMA,
+        }).pipe(
+          Effect.mapError(
+            (e) => new SuggestError({ message: e.message, cause: e.cause }),
+          ),
           Effect.timeoutFail({
             duration: "60 seconds",
             onTimeout: () =>
               new SuggestError({ message: "claude suggest timed out" }),
           }),
         );
-
-        const parsed = yield* Effect.try({
-          try: () => JSON.parse(stdout) as unknown,
-          catch: (cause) =>
-            new SuggestError({ message: "non-JSON response", cause }),
-        });
         const suggestions = extractSuggestions(parsed);
         if (!suggestions || suggestions.length === 0) {
           return yield* Effect.fail(

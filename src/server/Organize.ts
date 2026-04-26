@@ -1,5 +1,6 @@
 import { Context, Data, Effect, Layer } from "effect";
 import type { AppKind } from "./Schema";
+import { callJsonSchema, unwrapStructured } from "./SonnetJson";
 
 /**
  * After every successful build, ask claude-sonnet to bucket the family's
@@ -103,94 +104,18 @@ function buildPrompt(apps: OrganizeInput): string {
 type RawGroup = { name?: unknown; appIds?: unknown };
 
 function extractGroups(parsed: unknown): ReadonlyArray<OrganizeGroup> | null {
-  if (!parsed || typeof parsed !== "object") return null;
-  // claude --json-schema lands the validated payload at `.structured_output`;
-  // older versions wrapped it under `.result`. Be defensive about both, plus
-  // the bare top-level shape.
-  const p = parsed as Record<string, unknown>;
-  const candidates = [p["structured_output"], p["result"], parsed];
-  for (const c of candidates) {
-    if (c && typeof c === "object" && Array.isArray((c as { groups?: unknown }).groups)) {
-      const raw = (c as { groups: ReadonlyArray<RawGroup> }).groups;
-      const groups: OrganizeGroup[] = [];
-      for (const g of raw) {
-        if (typeof g.name !== "string") continue;
-        if (!Array.isArray(g.appIds)) continue;
-        const ids = g.appIds.filter((x): x is string => typeof x === "string");
-        if (ids.length === 0) continue;
-        groups.push({ name: g.name.slice(0, 40), appIds: ids });
-      }
-      if (groups.length > 0) return groups;
-    }
+  const obj = unwrapStructured(parsed);
+  if (!obj || !Array.isArray(obj["groups"])) return null;
+  const raw = obj["groups"] as ReadonlyArray<RawGroup>;
+  const groups: OrganizeGroup[] = [];
+  for (const g of raw) {
+    if (typeof g.name !== "string") continue;
+    if (!Array.isArray(g.appIds)) continue;
+    const ids = g.appIds.filter((x): x is string => typeof x === "string");
+    if (ids.length === 0) continue;
+    groups.push({ name: g.name.slice(0, 40), appIds: ids });
   }
-  return null;
-}
-
-/**
- * Effect-wrapped spawn of `claude --print` for short json-schema-bound
- * calls. Uses `acquireUseRelease` so the subprocess is killed on
- * interruption, timeout, or any failure path — otherwise a stuck claude
- * keeps running in the background after the calling Effect exits.
- */
-function callClaude(prompt: string) {
-  return Effect.acquireUseRelease(
-    Effect.sync(() =>
-      Bun.spawn(
-        [
-          "claude",
-          "--print",
-          "--model",
-          "sonnet",
-          "--effort",
-          "low",
-          "--output-format",
-          "json",
-          "--json-schema",
-          RESPONSE_SCHEMA,
-          "--permission-mode",
-          "bypassPermissions",
-          // `--tools` is variadic — must be followed by a non-variadic flag
-          // (here `--strict-mcp-config`) so it doesn't slurp the prompt.
-          "--tools",
-          "",
-          "--strict-mcp-config",
-          "--mcp-config",
-          '{"mcpServers":{}}',
-          "--disable-slash-commands",
-          "--setting-sources",
-          "",
-          "--exclude-dynamic-system-prompt-sections",
-          prompt,
-        ],
-        { stdout: "pipe", stderr: "pipe" },
-      ),
-    ),
-    (proc) =>
-      Effect.tryPromise({
-        try: async () => {
-          const stdout = await new Response(proc.stdout).text();
-          const code = await proc.exited;
-          if (code !== 0) {
-            const stderr = await new Response(proc.stderr).text();
-            throw new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`);
-          }
-          return stdout;
-        },
-        catch: (cause) =>
-          new OrganizeError({
-            message: cause instanceof Error ? cause.message : String(cause),
-            cause,
-          }),
-      }),
-    (proc) =>
-      Effect.sync(() => {
-        try {
-          proc.kill();
-        } catch {
-          /* already exited */
-        }
-      }),
-  );
+  return groups.length > 0 ? groups : null;
 }
 
 const fallback = (apps: OrganizeInput): ReadonlyArray<OrganizeGroup> => [
@@ -205,22 +130,19 @@ export const OrganizeLive = Layer.succeed(
         if (apps.length < 2) return fallback(apps);
 
         const t0 = Date.now();
-        const stdout = yield* callClaude(buildPrompt(apps)).pipe(
+        const parsed = yield* callJsonSchema({
+          prompt: buildPrompt(apps),
+          schema: RESPONSE_SCHEMA,
+        }).pipe(
+          Effect.mapError(
+            (e) => new OrganizeError({ message: e.message, cause: e.cause }),
+          ),
           Effect.timeoutFail({
             duration: "60 seconds",
             onTimeout: () =>
               new OrganizeError({ message: "claude organize timed out" }),
           }),
         );
-
-        const parsed = yield* Effect.try({
-          try: () => JSON.parse(stdout) as unknown,
-          catch: (cause) =>
-            new OrganizeError({
-              message: "organize: response was not JSON",
-              cause,
-            }),
-        });
         const raw = extractGroups(parsed);
         if (!raw) {
           return yield* Effect.fail(
