@@ -127,6 +127,14 @@ function buildConfig(v: Variant) {
     agent: {
       first_message: v.firstMessage,
       language: v.language,
+      // iPad mics activate noisier than Macs (worklet warm-up, ambient
+      // noise, breath) and that audio reads as "user is talking" to
+      // ElevenLabs' VAD before initial_wait_time fires — so the agent
+      // skips the first_message entirely and waits for end-of-turn.
+      // Locking out interruptions during the first message means the
+      // greeting always plays even if the mic produces a half-second
+      // of garbage at session start.
+      disable_first_message_interruptions: true,
       prompt: {
         prompt: SYSTEM_PROMPT,
         llm: "gemini-2.5-flash",
