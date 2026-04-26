@@ -216,8 +216,12 @@ export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
     recorder.onstop = () => {
       teardown();
       const audio = new Blob(chunks, { type: mimeType });
+      // No bytes captured → either the user didn't speak, the mic was
+      // muted by the OS, or the encoder produced nothing. Surface as
+      // "error" so the overlay can show a "didn't catch that" hint
+      // instead of silently flipping back to idle with no transcript.
       if (audio.size === 0) {
-        setState("idle");
+        setState("error");
         return;
       }
       void submit(audio);

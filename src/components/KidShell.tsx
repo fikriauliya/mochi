@@ -1185,27 +1185,38 @@ function KidBuildView({
     if (verbose) setShowLog(true);
   }, [verbose]);
 
+  // Read the latest `lang` inside the stream handler via ref so a
+  // mid-build language toggle doesn't re-subscribe to the SSE (which
+  // would orphan the prior subscription and double-speak the done line).
+  const langRef = React.useRef(lang);
+  React.useEffect(() => {
+    langRef.current = lang;
+  });
+
   React.useEffect(() => {
     if (phase !== "cooking") return;
+    const l = langRef.current;
     speak(
-      lang === "id-ID"
+      l === "id-ID"
         ? "Mochi lagi bikin, sebentar ya!"
         : "Mochi is making it, hang tight!",
-      lang,
+      l,
     );
     const unsub = subscribeStream(app.id, (ev: BuildEvent) => {
       setEvents((prev) => [...prev, ev]);
       if (ev.type === "done") {
         setPhase("done");
-        speak(lang === "id-ID" ? "Sudah jadi!" : "It's ready!", lang);
+        const cur = langRef.current;
+        speak(cur === "id-ID" ? "Sudah jadi!" : "It's ready!", cur);
       } else if (ev.type === "error") {
         setPhase("error");
         setErrorMessage(ev.message);
+        const cur = langRef.current;
         speak(
-          lang === "id-ID"
+          cur === "id-ID"
             ? "Aduh, Mochi nyangkut. Coba lagi?"
             : "Oops, Mochi got stuck. Try again?",
-          lang,
+          cur,
         );
       }
     });
@@ -1213,7 +1224,7 @@ function KidBuildView({
       unsub();
       cancelSpeech();
     };
-  }, [app.id, lang, phase]);
+  }, [app.id, phase]);
 
   // Auto-navigate forward when the build finishes successfully.
   React.useEffect(() => {

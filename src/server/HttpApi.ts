@@ -197,12 +197,15 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
         runP(
           handle(
             Effect.gen(function* () {
+              // Sonnet organize takes ~10–20s. Don't block the HTTP
+              // request on it — fork a daemon and return 202 immediately.
+              // The frontend re-fetches /api/apps when it returns home.
               const jobs = yield* JobsService;
-              yield* jobs.reorganize();
+              yield* Effect.forkDaemon(jobs.reorganize());
               suggestCache = null;
               const reg = yield* RegistryService;
               const apps = yield* reg.list;
-              return okJson({ count: apps.length });
+              return okJson({ count: apps.length, scheduled: true }, 202);
             }),
           ),
         ),

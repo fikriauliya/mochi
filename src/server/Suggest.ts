@@ -96,44 +96,68 @@ function extractSuggestions(parsed: unknown): ReadonlyArray<string> | null {
   return null;
 }
 
-async function callClaude(prompt: string): Promise<string> {
-  const proc = Bun.spawn(
-    [
-      "claude",
-      "--print",
-      "--model",
-      "sonnet",
-      "--effort",
-      "low",
-      "--output-format",
-      "json",
-      "--json-schema",
-      RESPONSE_SCHEMA,
-      "--permission-mode",
-      "bypassPermissions",
-      // `--tools` is variadic; the empty value here is "no built-in tools",
-      // and `--strict-mcp-config` (boolean) terminates the variadic so the
-      // prompt at the end stays a positional arg.
-      "--tools",
-      "",
-      "--strict-mcp-config",
-      "--mcp-config",
-      '{"mcpServers":{}}',
-      "--disable-slash-commands",
-      "--setting-sources",
-      "",
-      "--exclude-dynamic-system-prompt-sections",
-      prompt,
-    ],
-    { stdout: "pipe", stderr: "pipe" },
+/**
+ * Effect-wrapped spawn of `claude --print`. acquireUseRelease guarantees
+ * the subprocess is killed on interruption, timeout, or failure — without
+ * this, a stuck claude leaks past the timeout.
+ */
+function callClaude(prompt: string) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() =>
+      Bun.spawn(
+        [
+          "claude",
+          "--print",
+          "--model",
+          "sonnet",
+          "--effort",
+          "low",
+          "--output-format",
+          "json",
+          "--json-schema",
+          RESPONSE_SCHEMA,
+          "--permission-mode",
+          "bypassPermissions",
+          "--tools",
+          "",
+          "--strict-mcp-config",
+          "--mcp-config",
+          '{"mcpServers":{}}',
+          "--disable-slash-commands",
+          "--setting-sources",
+          "",
+          "--exclude-dynamic-system-prompt-sections",
+          prompt,
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      ),
+    ),
+    (proc) =>
+      Effect.tryPromise({
+        try: async () => {
+          const stdout = await new Response(proc.stdout).text();
+          const code = await proc.exited;
+          if (code !== 0) {
+            const stderr = await new Response(proc.stderr).text();
+            throw new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`);
+          }
+          return stdout;
+        },
+        catch: (cause) =>
+          new SuggestError({
+            message: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }),
+      }),
+    (proc) =>
+      Effect.sync(() => {
+        try {
+          proc.kill();
+        } catch {
+          /* already exited */
+        }
+      }),
   );
-  const stdout = await new Response(proc.stdout).text();
-  const code = await proc.exited;
-  if (code !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`);
-  }
-  return stdout;
 }
 
 export const SuggestLive = Layer.succeed(
@@ -142,14 +166,7 @@ export const SuggestLive = Layer.succeed(
     suggest: (apps) =>
       Effect.gen(function* () {
         const t0 = Date.now();
-        const stdout = yield* Effect.tryPromise({
-          try: () => callClaude(buildPrompt(apps)),
-          catch: (cause) =>
-            new SuggestError({
-              message: cause instanceof Error ? cause.message : String(cause),
-              cause,
-            }),
-        }).pipe(
+        const stdout = yield* callClaude(buildPrompt(apps)).pipe(
           Effect.timeoutFail({
             duration: "60 seconds",
             onTimeout: () =>

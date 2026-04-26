@@ -126,44 +126,71 @@ function extractGroups(parsed: unknown): ReadonlyArray<OrganizeGroup> | null {
   return null;
 }
 
-async function callClaude(prompt: string): Promise<string> {
-  const proc = Bun.spawn(
-    [
-      "claude",
-      "--print",
-      "--model",
-      "sonnet",
-      "--effort",
-      "low",
-      "--output-format",
-      "json",
-      "--json-schema",
-      RESPONSE_SCHEMA,
-      "--permission-mode",
-      "bypassPermissions",
-      // `--tools` is variadic — must be followed by a non-variadic flag to
-      // stop it slurping subsequent args. We put the empty value here and
-      // let `--strict-mcp-config` (a boolean flag) terminate the list.
-      "--tools",
-      "",
-      "--strict-mcp-config",
-      "--mcp-config",
-      '{"mcpServers":{}}',
-      "--disable-slash-commands",
-      "--setting-sources",
-      "",
-      "--exclude-dynamic-system-prompt-sections",
-      prompt,
-    ],
-    { stdout: "pipe", stderr: "pipe" },
+/**
+ * Effect-wrapped spawn of `claude --print` for short json-schema-bound
+ * calls. Uses `acquireUseRelease` so the subprocess is killed on
+ * interruption, timeout, or any failure path — otherwise a stuck claude
+ * keeps running in the background after the calling Effect exits.
+ */
+function callClaude(prompt: string) {
+  return Effect.acquireUseRelease(
+    Effect.sync(() =>
+      Bun.spawn(
+        [
+          "claude",
+          "--print",
+          "--model",
+          "sonnet",
+          "--effort",
+          "low",
+          "--output-format",
+          "json",
+          "--json-schema",
+          RESPONSE_SCHEMA,
+          "--permission-mode",
+          "bypassPermissions",
+          // `--tools` is variadic — must be followed by a non-variadic flag
+          // (here `--strict-mcp-config`) so it doesn't slurp the prompt.
+          "--tools",
+          "",
+          "--strict-mcp-config",
+          "--mcp-config",
+          '{"mcpServers":{}}',
+          "--disable-slash-commands",
+          "--setting-sources",
+          "",
+          "--exclude-dynamic-system-prompt-sections",
+          prompt,
+        ],
+        { stdout: "pipe", stderr: "pipe" },
+      ),
+    ),
+    (proc) =>
+      Effect.tryPromise({
+        try: async () => {
+          const stdout = await new Response(proc.stdout).text();
+          const code = await proc.exited;
+          if (code !== 0) {
+            const stderr = await new Response(proc.stderr).text();
+            throw new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`);
+          }
+          return stdout;
+        },
+        catch: (cause) =>
+          new OrganizeError({
+            message: cause instanceof Error ? cause.message : String(cause),
+            cause,
+          }),
+      }),
+    (proc) =>
+      Effect.sync(() => {
+        try {
+          proc.kill();
+        } catch {
+          /* already exited */
+        }
+      }),
   );
-  const stdout = await new Response(proc.stdout).text();
-  const code = await proc.exited;
-  if (code !== 0) {
-    const stderr = await new Response(proc.stderr).text();
-    throw new Error(`claude exited ${code}: ${stderr.slice(0, 500)}`);
-  }
-  return stdout;
 }
 
 const fallback = (apps: OrganizeInput): ReadonlyArray<OrganizeGroup> => [
@@ -178,14 +205,7 @@ export const OrganizeLive = Layer.succeed(
         if (apps.length < 2) return fallback(apps);
 
         const t0 = Date.now();
-        const stdout = yield* Effect.tryPromise({
-          try: () => callClaude(buildPrompt(apps)),
-          catch: (cause) =>
-            new OrganizeError({
-              message: cause instanceof Error ? cause.message : String(cause),
-              cause,
-            }),
-        }).pipe(
+        const stdout = yield* callClaude(buildPrompt(apps)).pipe(
           Effect.timeoutFail({
             duration: "60 seconds",
             onTimeout: () =>
