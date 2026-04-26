@@ -84,9 +84,6 @@ export const BuildEvent = S.Union(
   S.Struct({ type: S.Literal("tool_result"), tool: S.String, ok: S.Boolean, summary: S.String, t: T }),
   S.Struct({ type: S.Literal("done"), t: T }),
   S.Struct({ type: S.Literal("error"), message: S.String, t: T }),
-  // Full JSON of the original claude stream-json event. Always emitted
-  // alongside the projection; the UI hides them unless verbose mode is on.
-  S.Struct({ type: S.Literal("raw"), json: S.String, t: T }),
 );
 export type BuildEvent = S.Schema.Type<typeof BuildEvent>;
 

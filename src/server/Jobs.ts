@@ -417,7 +417,6 @@ export const JobsLive = Layer.effect(
                   `[build ${id}] claude TTFT ${firstEventAt - t0}ms`,
                 );
               }
-              yield* publish({ type: "raw", json: JSON.stringify(raw) });
 
               // Capture the model id from the system/init preamble so we
               // can price the result event when it arrives. Some claude

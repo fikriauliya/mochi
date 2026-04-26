@@ -172,7 +172,7 @@ The HTTP surface:
 | PATCH  | `/api/apps/:id`            | toggle favorite                                                 |
 | DELETE | `/api/apps/:id`            | drop                                                            |
 | POST   | `/api/apps/:id/modify`     | resume the claude session (apps) or regenerate (printables)     |
-| GET    | `/api/apps/:id/stream`     | live SSE — text, tool, tool_result, status, done, error, raw    |
+| GET    | `/api/apps/:id/stream`     | live SSE — text, tool, tool_result, status, done, error         |
 | POST   | `/api/apps/reorganize`     | manually re-run the sonnet category step                        |
 | GET    | `/api/suggestions`         | dynamic prompt ideas (sonnet, server-cached on app-id set)      |
 | POST   | `/api/voice/agent-url`     | signed wss:// for the kid-PM Conversational AI agent            |

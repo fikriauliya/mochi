@@ -10,26 +10,21 @@ type Props = {
 export function AgentLog({ events }: Props) {
   const scrollRef = React.useRef<HTMLDivElement>(null);
 
-  // `raw` carries the full claude stream-json (every partial-message
-  // delta, system/init, etc.) — dozens-to-hundreds per build, useful
-  // only for debugging the SDK itself, not for watching the build.
-  const visible = events.filter((e) => e.type !== "raw");
-
   React.useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     el.scrollTop = el.scrollHeight;
-  }, [visible.length]);
+  }, [events.length]);
 
   return (
     <div
       ref={scrollRef}
       className="overflow-y-auto rounded-2xl border border-line bg-cream-deep/50 px-4 py-3 font-mono leading-relaxed space-y-1 max-h-[40vh] text-[0.78rem]"
     >
-      {visible.length === 0 ? (
+      {events.length === 0 ? (
         <div className="text-ink-faint italic">Waiting for Mochi…</div>
       ) : (
-        visible.map((ev, i) => <LogLine key={i} ev={ev} />)
+        events.map((ev, i) => <LogLine key={i} ev={ev} />)
       )}
     </div>
   );
@@ -79,8 +74,6 @@ function LogLine({ ev }: { ev: BuildEvent }) {
           <span className="whitespace-pre-wrap">{ev.message}</span>
         </div>
       );
-    case "raw":
-      return null;
   }
 }
 

@@ -30,8 +30,7 @@ export type BuildEvent =
   | { type: "tool"; tool: string; summary: string; t?: number }
   | { type: "tool_result"; tool: string; ok: boolean; summary: string; t?: number }
   | { type: "done"; t?: number }
-  | { type: "error"; message: string; t?: number }
-  | { type: "raw"; json: string; t?: number };
+  | { type: "error"; message: string; t?: number };
 
 /**
  * Every value of `BuildEvent.type`. Kept here so `lib/api.ts` can register
@@ -45,5 +44,4 @@ export const BUILD_EVENT_TYPES: ReadonlyArray<BuildEvent["type"]> = [
   "tool_result",
   "done",
   "error",
-  "raw",
 ] as const satisfies ReadonlyArray<BuildEvent["type"]>;

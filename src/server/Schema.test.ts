@@ -119,9 +119,6 @@ describe("BuildEvent", () => {
   test("decodes error", () => {
     expect(isOk(decode({ type: "error", message: "boom" }))).toBe(true);
   });
-  test("decodes raw", () => {
-    expect(isOk(decode({ type: "raw", json: '{"x":1}' }))).toBe(true);
-  });
   test("rejects unknown type", () => {
     expect(isErr(decode({ type: "weird" }))).toBe(true);
   });
