@@ -103,10 +103,24 @@ export function App() {
 
   const onModify = React.useCallback(
     async (id: string, prompt: string) => {
+      // Optimistic: flip status to building and route to the build view
+      // immediately, before the HTTP response. We have to update *both*
+      // `apps` and `currentApp` here — KidBuildView reads the status on
+      // its first render to decide whether to subscribe to the stream or
+      // auto-redirect, and `currentApp`'s useEffect-driven reconciliation
+      // would otherwise leave it on the stale "ready" object for one
+      // render, which is enough to trigger the redirect back to the
+      // pre-modify iframe.
+      const flipBuilding = (a: App): App =>
+        a.id === id
+          ? { ...a, status: "building" as const, lastError: undefined }
+          : a;
+      setApps((cur) => cur.map(flipBuilding));
+      setCurrentApp((cur) => (cur && cur.id === id ? flipBuilding(cur) : cur));
+      navigate({ kind: "build", appId: id });
       try {
         const app = await modifyApp(id, { prompt });
         setApps((cur) => cur.map((a) => (a.id === id ? app : a)));
-        navigate({ kind: "build", appId: id });
       } catch (e) {
         console.error("modifyApp failed", e);
       }

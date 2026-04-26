@@ -251,9 +251,13 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
               });
               const parsed = yield* decodeCreate(body);
               const reg = yield* RegistryService;
-              const app = yield* reg.get(req.params.id);
+              yield* reg.get(req.params.id); // 404 fast if missing
               const jobs = yield* JobsService;
               yield* jobs.start(req.params.id, "modify", parsed.prompt);
+              // jobs.start has synchronously flipped status="building"; refetch
+              // so the response reflects that — otherwise the client's local
+              // copy stays "ready" and the build view auto-redirects past us.
+              const app = yield* reg.get(req.params.id);
               return okJson(app, 202);
             }),
           ),
