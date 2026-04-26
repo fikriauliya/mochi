@@ -43,3 +43,6 @@ apps/*
 
 # Server data (sqlite)
 data/
+
+# Claude Code session state
+.claude/
