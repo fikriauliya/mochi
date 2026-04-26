@@ -6,6 +6,7 @@ import {
   ExternalLink,
   Pencil,
   Printer,
+  Camera,
   RefreshCcw,
   Star,
   Trash2,
@@ -18,6 +19,7 @@ import {
 import { Mochi } from "./Mochi";
 import { AgentLog } from "./AgentLog";
 import { KidPMOverlay } from "./KidPMOverlay";
+import { KidScanOverlay } from "./KidScanOverlay";
 import {
   SPEECH_LANG_LABELS,
   type SpeechLang,
@@ -164,7 +166,8 @@ function KidHome(props: {
         app?: App;
         seed?: string;
         outputKind?: AppKind;
-      };
+      }
+    | { kind: "scan" };
   const [composer, setComposer] = React.useState<Composer>({ kind: "idle" });
   const [menuApp, setMenuApp] = React.useState<App | null>(null);
 
@@ -206,6 +209,7 @@ function KidHome(props: {
       ...(outputKind ? { outputKind } : {}),
     });
   const openType = () => setComposer({ kind: "text", intent: "create" });
+  const openScan = () => setComposer({ kind: "scan" });
 
   return (
     <div className="h-dvh w-screen bg-cream flex flex-col overflow-hidden">
@@ -221,6 +225,7 @@ function KidHome(props: {
           <CompactComposerBar
             onMic={() => openVoice()}
             onPrintable={() => openVoice("printable")}
+            onScan={openScan}
             onType={openType}
           />
           <div className="flex-1 overflow-y-auto px-4 pt-3 pb-6 sm:pb-8">
@@ -338,6 +343,19 @@ function KidHome(props: {
                 <Printer className="size-4 2xl:size-5" /> Make a printable
               </button>
               <button
+                onClick={openScan}
+                className="
+                  inline-flex items-center gap-1.5 px-4 py-2 2xl:px-5 2xl:py-3 rounded-full
+                  bg-paper border-2 border-mochi-deep/40 text-mochi-deep font-bold
+                  text-[0.85rem] 2xl:text-base
+                  hover:bg-mochi-soft hover:border-mochi-deep transition-colors
+                  focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+                "
+                title="Photograph a printed worksheet — Mochi turns it into an app"
+              >
+                <Camera className="size-4 2xl:size-5" /> Scan a worksheet
+              </button>
+              <button
                 onClick={openType}
                 className="
                   inline-flex items-center gap-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full
@@ -404,6 +422,16 @@ function KidHome(props: {
         />
       )}
 
+      {composer.kind === "scan" && (
+        <KidScanOverlay
+          onClose={() => setComposer({ kind: "idle" })}
+          onPrompt={(spec) => {
+            setComposer({ kind: "idle" });
+            onCreate(spec, "app", lang);
+          }}
+        />
+      )}
+
       {menuApp && (
         <KidAppMenu
           app={menuApp}
@@ -448,10 +476,12 @@ function KidHome(props: {
 function CompactComposerBar({
   onMic,
   onPrintable,
+  onScan,
   onType,
 }: {
   onMic: () => void;
   onPrintable: () => void;
+  onScan: () => void;
   onType: () => void;
 }) {
   return (
@@ -494,6 +524,20 @@ function CompactComposerBar({
       >
         <Printer className="size-4 2xl:size-5" />
         <span className="hidden sm:inline">Printable</span>
+      </button>
+      <button
+        onClick={onScan}
+        title="Photograph a printed worksheet → app"
+        className="
+          shrink-0 inline-flex items-center gap-1.5 px-3 py-2 sm:px-4 2xl:px-5 2xl:py-2.5 rounded-full
+          bg-paper border-2 border-mochi-deep/40 text-mochi-deep font-bold
+          text-[0.78rem] 2xl:text-base
+          hover:bg-mochi-soft hover:border-mochi-deep transition-colors
+          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+        "
+      >
+        <Camera className="size-4 2xl:size-5" />
+        <span className="hidden sm:inline">Scan</span>
       </button>
       <button
         onClick={onType}

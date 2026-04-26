@@ -9,6 +9,7 @@ import { PrintableService } from "./Printable";
 import { RegistryService } from "./Registry";
 import { type App, CreateAppRequest, PatchAppRequest } from "./Schema";
 import { SuggestService } from "./Suggest";
+import { VisionService } from "./Vision";
 import { VoiceService } from "./Voice";
 
 /** Services consumed by the HTTP route handlers. */
@@ -20,6 +21,7 @@ export type MochiServices =
   | PrintableService
   | OrganizeService
   | SuggestService
+  | VisionService
   | VoiceService
   | Path.Path;
 
@@ -378,6 +380,34 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
               const voice = yield* VoiceService;
               const text = yield* voice.transcribe(audio, mimeType, lang);
               return okJson({ text });
+            }),
+          ),
+        ),
+    },
+
+    // Reverse-engineer a printed worksheet/coloring page/maze into a
+    // spec for an interactive app. Body: raw image bytes (jpeg/png/webp),
+    // content-type matching. Returns {name, emoji, description, spec};
+    // the client then POSTs spec to /api/apps as a normal create.
+    "/api/scan/worksheet": {
+      POST: (req: Request) =>
+        runP(
+          handle(
+            Effect.gen(function* () {
+              const buf = yield* Effect.tryPromise({
+                try: () => req.arrayBuffer(),
+                catch: () => new Error("invalid image body"),
+              });
+              const image = new Uint8Array(buf);
+              if (image.byteLength === 0)
+                return errorJson(400, "empty image");
+              if (image.byteLength > 5 * 1024 * 1024)
+                return errorJson(413, "image too large (max 5MB)");
+              const mimeType =
+                req.headers.get("content-type") ?? "image/jpeg";
+              const vision = yield* VisionService;
+              const result = yield* vision.scanWorksheet(image, mimeType);
+              return okJson(result);
             }),
           ),
         ),

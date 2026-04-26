@@ -42,6 +42,24 @@ export const getAgentSignedUrl = (): Promise<string> =>
     .then((r) => asJson<{ signedUrl: string }>(r))
     .then((d) => d.signedUrl);
 
+export const scanWorksheet = (
+  image: Blob,
+): Promise<{
+  name: string;
+  emoji: string;
+  description: string;
+  spec: string;
+}> =>
+  fetch("/api/scan/worksheet", {
+    method: "POST",
+    headers: { "content-type": image.type || "image/jpeg" },
+    body: image,
+  }).then((r) =>
+    asJson<{ name: string; emoji: string; description: string; spec: string }>(
+      r,
+    ),
+  );
+
 export const getApp = (id: string): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}`).then((r) => asJson<App>(r));
 

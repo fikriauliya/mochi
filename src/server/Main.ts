@@ -9,11 +9,13 @@ import { OrganizeLive } from "./Organize";
 import { PrintableLive } from "./Printable";
 import { RegistryLive } from "./Registry";
 import { SuggestLive } from "./Suggest";
+import { VisionLive } from "./Vision";
 import { VoiceLive } from "./Voice";
 
-// Registry, Claude, Build, Printable, Organize, Narrator, Suggest, and
-// Voice are siblings; Jobs consumes the first six (Suggest + Voice are
-// HTTP-only). Resolved against BunContext at the bottom of the layer stack.
+// Registry, Claude, Build, Printable, Organize, Narrator, Suggest,
+// Vision, and Voice are siblings; Jobs consumes the first six
+// (Suggest / Vision / Voice are HTTP-only). Resolved against
+// BunContext at the bottom of the layer stack.
 const Siblings = Layer.mergeAll(
   RegistryLive,
   ClaudeLive,
@@ -22,6 +24,7 @@ const Siblings = Layer.mergeAll(
   OrganizeLive,
   NarratorLive,
   SuggestLive,
+  VisionLive,
   VoiceLive,
 );
 
