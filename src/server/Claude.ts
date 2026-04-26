@@ -117,10 +117,18 @@ export const ClaudeLive = Layer.effect(
           // MOCHI_CLAUDE_MODEL=opus (or a full model id) in .env if you want
           // higher-quality output for a specific session.
           const model = process.env["MOCHI_CLAUDE_MODEL"] ?? "sonnet";
+          // Effort controls extended-thinking depth. Sonnet with the
+          // default level will spend many minutes generating reasoning
+          // tokens before issuing tool calls — too much for a short app
+          // build. "low" still produces solid output; bump to medium/high
+          // via MOCHI_CLAUDE_EFFORT if you need the agent to think harder.
+          const effort = process.env["MOCHI_CLAUDE_EFFORT"] ?? "low";
           const args = [
             "--print",
             "--model",
             model,
+            "--effort",
+            effort,
             "--output-format",
             "stream-json",
             "--include-partial-messages",
