@@ -7,6 +7,7 @@ import { Effect, Exit, Layer, Stream } from "effect";
 import { BuildLive } from "./Build";
 import { ClaudeService, type ClaudeError } from "./Claude";
 import { JobsLive, JobsService, projectClaudeEvent } from "./Jobs";
+import { OrganizeService } from "./Organize";
 import { PrintableError, PrintableService } from "./Printable";
 import { makeRegistryLive, RegistryService } from "./Registry";
 import type { App, ClaudeStreamEvent } from "./Schema";
@@ -28,6 +29,14 @@ const StubPrintableLive = Layer.succeed(
           message: "PrintableService is not exercised in this test",
         }),
       ),
+  }),
+);
+
+// Organize never spawns claude in tests — return the input order unchanged.
+const StubOrganizeLive = Layer.succeed(
+  OrganizeService,
+  OrganizeService.of({
+    organize: (apps) => Effect.succeed(apps.map((a) => a.id)),
   }),
 );
 
@@ -208,6 +217,8 @@ const seedApp = (id: string): App => ({
   description: "",
   prompt: "make a counter",
   status: "building",
+  favorite: false,
+  position: 0,
   createdAt: Date.now(),
   updatedAt: Date.now(),
 });
@@ -223,6 +234,7 @@ const TestServices = (
         MockClaudeLive(events, sideEffect),
         BuildLive,
         StubPrintableLive,
+        StubOrganizeLive,
       ),
     ),
     Layer.provideMerge(BunContext.layer),
@@ -379,6 +391,7 @@ describe("Jobs (end-to-end with mock claude)", () => {
           ),
           BuildLive,
           StubPrintableLive,
+          StubOrganizeLive,
         ),
       ),
       Layer.provideMerge(BunContext.layer),

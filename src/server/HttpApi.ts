@@ -4,9 +4,10 @@ import indexHtml from "../index.html";
 import { BuildService } from "./Build";
 import { ClaudeService } from "./Claude";
 import { JobsService } from "./Jobs";
+import { OrganizeService } from "./Organize";
 import { PrintableService } from "./Printable";
 import { RegistryService } from "./Registry";
-import { type App, CreateAppRequest } from "./Schema";
+import { type App, CreateAppRequest, PatchAppRequest } from "./Schema";
 
 /** Services consumed by the HTTP route handlers. */
 export type MochiServices =
@@ -15,6 +16,7 @@ export type MochiServices =
   | ClaudeService
   | BuildService
   | PrintableService
+  | OrganizeService
   | Path.Path;
 
 const SSE_HEADERS: Record<string, string> = {
@@ -53,6 +55,7 @@ self.addEventListener("fetch", () => {});
 `;
 
 const decodeCreate = S.decodeUnknown(CreateAppRequest);
+const decodePatch = S.decodeUnknown(PatchAppRequest);
 
 function shortHex(n = 4): string {
   return [...crypto.getRandomValues(new Uint8Array(n))]
@@ -149,6 +152,8 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
                 description: parsed.prompt,
                 prompt: parsed.prompt,
                 status: "building",
+                favorite: false,
+                position: 0,
                 createdAt: now,
                 updatedAt: now,
               };
@@ -171,6 +176,28 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
               const reg = yield* RegistryService;
               const app = yield* reg.get(req.params.id);
               return okJson(app);
+            }),
+          ),
+        ),
+
+      // ---- PATCH (favorite toggle today; future user-settable fields go here) ----
+      PATCH: (req: Request & { params: { id: string } }) =>
+        runP(
+          handle(
+            Effect.gen(function* () {
+              const body = yield* Effect.tryPromise({
+                try: () => req.json(),
+                catch: () => new Error("invalid JSON body"),
+              });
+              const parsed = yield* decodePatch(body);
+              const reg = yield* RegistryService;
+              const updated = yield* reg.patch(
+                req.params.id,
+                parsed.favorite !== undefined
+                  ? { favorite: parsed.favorite }
+                  : {},
+              );
+              return okJson(updated);
             }),
           ),
         ),

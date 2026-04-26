@@ -25,6 +25,8 @@ const sample = (over: Partial<App> = {}): App => ({
   description: "test app",
   prompt: "hi",
   status: "ready",
+  favorite: false,
+  position: 0,
   createdAt: 1,
   updatedAt: 1,
   ...over,

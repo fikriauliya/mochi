@@ -20,11 +20,20 @@ export const App = S.Struct({
   description: S.String,
   prompt: S.String,
   status: AppStatus,
+  favorite: S.Boolean,
+  /** Lower = earlier on the home grid. Set by the organize service after each build. */
+  position: S.Number,
   createdAt: S.Number,
   updatedAt: S.Number,
   lastError: S.optional(S.String),
 });
 export type App = S.Schema.Type<typeof App>;
+
+/** Body of PATCH /api/apps/:id — currently only favorite is user-settable. */
+export const PatchAppRequest = S.Struct({
+  favorite: S.optional(S.Boolean),
+});
+export type PatchAppRequest = S.Schema.Type<typeof PatchAppRequest>;
 
 /**
  * Body of POST /api/apps. `kind` is optional; legacy clients posting just

@@ -4,17 +4,19 @@ import { BuildLive } from "./Build";
 import { ClaudeLive } from "./Claude";
 import { makeRoutes, type MochiServices } from "./HttpApi";
 import { JobsLive } from "./Jobs";
+import { OrganizeLive } from "./Organize";
 import { PrintableLive } from "./Printable";
 import { RegistryLive } from "./Registry";
 
-// Registry, Claude, Build, and Printable are siblings; Jobs consumes all of
-// them. Then everything is resolved against BunContext (FileSystem, Path,
-// CommandExecutor).
+// Registry, Claude, Build, Printable, and Organize are siblings; Jobs
+// consumes all of them. Then everything is resolved against BunContext
+// (FileSystem, Path, CommandExecutor).
 const Siblings = Layer.mergeAll(
   RegistryLive,
   ClaudeLive,
   BuildLive,
   PrintableLive,
+  OrganizeLive,
 );
 
 /** All services composed into a single Layer for the runtime. */

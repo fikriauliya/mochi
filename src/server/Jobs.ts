@@ -13,6 +13,7 @@ import {
 } from "effect";
 import { BuildService } from "./Build";
 import { ClaudeService, ClaudeError } from "./Claude";
+import { OrganizeService } from "./Organize";
 import { computeCost, formatCost, type Usage } from "./Pricing";
 import { PrintableService } from "./Printable";
 import { AppNotFound, RegistryError, RegistryService } from "./Registry";
@@ -182,9 +183,43 @@ export const JobsLive = Layer.effect(
     const registry = yield* RegistryService;
     const builder = yield* BuildService;
     const printable = yield* PrintableService;
+    const organizer = yield* OrganizeService;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const jobs = yield* Ref.make<ReadonlyMap<string, ActiveJob>>(new Map());
+
+    /**
+     * After a successful build, ask claude-sonnet to reshuffle the home
+     * grid into a sensible order, then write each app's `position`. Runs
+     * as a daemon — never blocks the build's `done` event. All errors
+     * are swallowed in OrganizeService; this just persists whatever order
+     * comes back.
+     */
+    const scheduleReorganize = Effect.gen(function* () {
+      const allApps = yield* registry.list;
+      const ready = allApps.filter((a) => a.status === "ready");
+      if (ready.length < 2) return;
+      const order = yield* organizer.organize(
+        ready.map((a) => ({
+          id: a.id,
+          name: a.name,
+          emoji: a.emoji,
+          description: a.description,
+          kind: a.kind,
+        })),
+      );
+      yield* Effect.forEach(
+        order,
+        (id, i) => registry.patch(id, { position: i }).pipe(Effect.ignore),
+        { concurrency: 4, discard: true },
+      );
+    }).pipe(
+      Effect.catchAll((cause) =>
+        Effect.logWarning(
+          `[organize] persistence failed: ${cause instanceof Error ? cause.message : String(cause)}`,
+        ),
+      ),
+    );
 
     const setJob = (id: string, job: ActiveJob) =>
       Ref.update(jobs, (m) => new Map(m).set(id, job));
@@ -315,6 +350,8 @@ export const JobsLive = Layer.effect(
             status: "ready",
             lastError: undefined,
           });
+
+          yield* Effect.forkDaemon(scheduleReorganize);
 
           const total = elapsed();
           yield* Effect.log(`[build ${id}] DONE total=${total}ms (printable)`);
@@ -467,6 +504,8 @@ export const JobsLive = Layer.effect(
           status: "ready",
           lastError: undefined,
         });
+
+        yield* Effect.forkDaemon(scheduleReorganize);
 
         const total = elapsed();
         yield* Effect.log(

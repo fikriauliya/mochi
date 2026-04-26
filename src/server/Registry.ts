@@ -39,6 +39,8 @@ const SCHEMA = `
     description TEXT NOT NULL,
     prompt      TEXT NOT NULL,
     status      TEXT NOT NULL,
+    favorite    INTEGER NOT NULL DEFAULT 0,
+    position    INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL,
     last_error  TEXT
@@ -47,18 +49,26 @@ const SCHEMA = `
 `;
 
 /**
- * One-shot migration for databases that pre-date the `kind` column.
- * `ALTER TABLE … ADD COLUMN` on an existing table; ignored when the column
- * already exists. SQLite has no `IF NOT EXISTS` for ADD COLUMN, so we
- * detect by inspecting `pragma_table_info`.
+ * Add columns to pre-existing databases. SQLite has no `IF NOT EXISTS` for
+ * ADD COLUMN, so we inspect `pragma_table_info` first. Each entry is
+ * idempotent — re-running on a fresh DB is a no-op.
  */
-function ensureKindColumn(db: Database): void {
-  const cols = db
-    .prepare<{ name: string }, []>("SELECT name FROM pragma_table_info('apps')")
-    .all();
-  const has = cols.some((c) => c.name === "kind");
-  if (!has) {
-    db.exec("ALTER TABLE apps ADD COLUMN kind TEXT NOT NULL DEFAULT 'app'");
+function migrateColumns(db: Database): void {
+  const cols = new Set(
+    db
+      .prepare<{ name: string }, []>("SELECT name FROM pragma_table_info('apps')")
+      .all()
+      .map((c) => c.name),
+  );
+  const additions: Array<[string, string]> = [
+    ["kind", "TEXT NOT NULL DEFAULT 'app'"],
+    ["favorite", "INTEGER NOT NULL DEFAULT 0"],
+    ["position", "INTEGER NOT NULL DEFAULT 0"],
+  ];
+  for (const [name, defn] of additions) {
+    if (!cols.has(name)) {
+      db.exec(`ALTER TABLE apps ADD COLUMN ${name} ${defn}`);
+    }
   }
 }
 
@@ -71,6 +81,8 @@ type Row = {
   description: string;
   prompt: string;
   status: string;
+  favorite: number;
+  position: number;
   created_at: number;
   updated_at: number;
   last_error: string | null;
@@ -85,6 +97,8 @@ const rowToApp = (row: Row): App => ({
   description: row.description,
   prompt: row.prompt,
   status: row.status as AppStatus,
+  favorite: row.favorite === 1,
+  position: row.position,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   ...(row.last_error != null ? { lastError: row.last_error } : {}),
@@ -124,7 +138,7 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
         d.exec("PRAGMA synchronous = NORMAL");
         d.exec("PRAGMA foreign_keys = ON");
         d.exec(SCHEMA);
-        ensureKindColumn(d);
+        migrateColumns(d);
         return d;
       }),
       (d) => Effect.sync(() => d.close()),
@@ -149,13 +163,15 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
         string,
         number,
         number,
+        number,
+        number,
         string | null,
       ]
     >(`
       INSERT INTO apps (
         id, session_id, kind, name, emoji, description,
-        prompt, status, created_at, updated_at, last_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        prompt, status, favorite, position, created_at, updated_at, last_error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         session_id  = excluded.session_id,
         kind        = excluded.kind,
@@ -164,6 +180,8 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
         description = excluded.description,
         prompt      = excluded.prompt,
         status      = excluded.status,
+        favorite    = excluded.favorite,
+        position    = excluded.position,
         updated_at  = excluded.updated_at,
         last_error  = excluded.last_error
     `);
@@ -182,6 +200,8 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
           app.description,
           app.prompt,
           app.status,
+          app.favorite ? 1 : 0,
+          app.position,
           app.createdAt,
           app.updatedAt,
           app.lastError ?? null,

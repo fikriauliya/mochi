@@ -56,6 +56,16 @@ export const deleteApp = (id: string): Promise<void> =>
     },
   );
 
+export const setFavorite = (
+  id: string,
+  favorite: boolean,
+): Promise<App> =>
+  fetch(`/api/apps/${encodeURIComponent(id)}`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ favorite }),
+  }).then((r) => asJson<App>(r));
+
 /**
  * Subscribe to a build/modify SSE stream. Returns an `unsubscribe` function.
  * `onEvent` is called for each typed `BuildEvent`; `onError` is invoked on

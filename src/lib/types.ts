@@ -11,6 +11,9 @@ export type App = {
   description: string;
   prompt: string;
   status: AppStatus;
+  favorite: boolean;
+  /** Lower = earlier on the home grid. Set by the organize service. */
+  position: number;
   createdAt: number;
   updatedAt: number;
   lastError?: string;

@@ -7,6 +7,7 @@ import {
   Pencil,
   Printer,
   RefreshCcw,
+  Star,
   Trash2,
   ChevronRight,
   ChevronDown,
@@ -23,7 +24,7 @@ import {
   useSpeechLang,
 } from "@/lib/speech";
 import { speak, cancelSpeech } from "@/lib/tts";
-import { deleteApp, subscribeStream } from "@/lib/api";
+import { deleteApp, setFavorite, subscribeStream } from "@/lib/api";
 import type { App, AppKind, BuildEvent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -160,8 +161,14 @@ function KidHome(props: {
   const [composer, setComposer] = React.useState<Composer>({ kind: "idle" });
   const [menuApp, setMenuApp] = React.useState<App | null>(null);
 
-  // newest first; show all statuses
-  const sorted = [...apps].sort((a, b) => b.updatedAt - a.updatedAt);
+  // Favorites pinned to the top; within each tier, the organize service's
+  // `position` (lower = earlier) drives order, with updatedAt as a tiebreak
+  // for fresh builds and for groups the model didn't reorder.
+  const sorted = [...apps].sort((a, b) => {
+    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
+    if (a.position !== b.position) return a.position - b.position;
+    return b.updatedAt - a.updatedAt;
+  });
   const hasApps = sorted.length > 0;
 
   const openVoice = (outputKind?: AppKind) =>
@@ -344,6 +351,15 @@ function KidHome(props: {
               console.error("delete failed", e);
             }
           }}
+          onToggleFavorite={async (app) => {
+            try {
+              const updated = await setFavorite(app.id, !app.favorite);
+              setMenuApp(updated);
+              onReload();
+            } catch (e) {
+              console.error("favorite toggle failed", e);
+            }
+          }}
         />
       )}
     </div>
@@ -489,6 +505,15 @@ function KidAppTile({
         )}
       </button>
 
+      {app.favorite && (
+        <div
+          className="absolute top-2 left-2 size-7 sm:size-8 rounded-full bg-amber-400 text-amber-900 shadow-[0_2px_6px_-2px_rgba(42,36,33,0.3)] flex items-center justify-center pointer-events-none"
+          aria-label="Favorite"
+        >
+          <Star className="size-4 sm:size-5 fill-current" strokeWidth={2} />
+        </div>
+      )}
+
       {/* Visible "more" button — discoverable on every device, doesn't conflict
           with the tap-to-play action because it sits in its own corner. */}
       <button
@@ -523,8 +548,9 @@ function KidAppMenu(props: {
   onOpen: (id: string) => void;
   onModify: (app: App) => void;
   onDelete: (id: string) => void;
+  onToggleFavorite: (app: App) => void;
 }) {
-  const { app, onClose, onOpen, onModify, onDelete } = props;
+  const { app, onClose, onOpen, onModify, onDelete, onToggleFavorite } = props;
   const [confirmDelete, setConfirmDelete] = React.useState(false);
   const isReady = app.status === "ready";
   const isBuilding = app.status === "building";
@@ -642,6 +668,22 @@ function KidAppMenu(props: {
             >
               <Pencil className="size-4" /> Modify
             </button>
+            <button
+              onClick={() => onToggleFavorite(app)}
+              className={cn(
+                "inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3 transition-colors",
+                "focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft",
+                app.favorite
+                  ? "bg-amber-300 text-amber-900 hover:bg-amber-400 font-semibold"
+                  : "bg-cream-deep border border-line text-ink hover:bg-paper-shadow",
+              )}
+            >
+              <Star
+                className={cn("size-4", app.favorite && "fill-current")}
+                strokeWidth={2}
+              />
+              {app.favorite ? "Favorited" : "Favorite"}
+            </button>
             <a
               href={`/apps/${app.id}/`}
               target="_blank"
@@ -658,7 +700,7 @@ function KidAppMenu(props: {
             <button
               onClick={() => setConfirmDelete(true)}
               className="
-                inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
+                col-span-2 inline-flex items-center justify-center gap-2 rounded-2xl px-4 py-3
                 bg-mom-soft border border-mom/30 text-mom-ink
                 hover:bg-mom-soft/80 transition-colors
                 focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
