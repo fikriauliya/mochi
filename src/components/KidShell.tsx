@@ -162,6 +162,15 @@ function KidHome(props: {
 
   // newest first; show all statuses
   const sorted = [...apps].sort((a, b) => b.updatedAt - a.updatedAt);
+  const hasApps = sorted.length > 0;
+
+  const openVoice = (outputKind?: AppKind) =>
+    setComposer({
+      kind: "voice",
+      intent: "create",
+      ...(outputKind ? { outputKind } : {}),
+    });
+  const openType = () => setComposer({ kind: "text", intent: "create" });
 
   return (
     <div className="h-dvh w-screen bg-cream flex flex-col overflow-hidden">
@@ -172,107 +181,16 @@ function KidHome(props: {
         <LangChip lang={lang} setLang={setLang} />
       </div>
 
-      <div className="flex-1 overflow-y-auto">
-       <div className="min-h-full flex flex-col">
-        <div className="flex-1 flex flex-col items-center justify-center gap-5 sm:gap-6 px-6 py-10">
-          <button
-            onClick={() => setComposer({ kind: "voice", intent: "create" })}
-            aria-label="Tap to talk"
-            autoFocus
-            className="
-              relative inline-flex items-center justify-center
-              size-40 sm:size-52 lg:size-60 2xl:size-72 rounded-full
-              bg-mochi-deep text-paper
-              shadow-[0_18px_40px_-12px_rgba(224,114,107,0.7)]
-              hover:scale-[1.04] active:scale-95 transition-transform
-              focus:outline-none focus-visible:ring-8 focus-visible:ring-mochi-soft
-            "
-          >
-            <span className="absolute inset-0 rounded-full bg-mochi-deep mic-halo" />
-            <Mic
-              className="size-20 sm:size-24 lg:size-28 2xl:size-36 relative"
-              strokeWidth={2}
-            />
-          </button>
-          <p
-            className="font-display text-2xl sm:text-3xl lg:text-4xl 2xl:text-5xl text-ink-soft italic text-center"
-            style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
-          >
-            Tap &amp; talk
-          </p>
-
-          {/* Suggestion chips */}
-          <div className="flex flex-wrap items-center justify-center gap-1.5 2xl:gap-2 max-w-2xl">
-            <span className="text-[0.7rem] 2xl:text-[0.85rem] uppercase tracking-[0.18em] text-ink-faint mr-1">
-              try
-            </span>
-            {SUGGESTIONS.map((s) => (
-              <button
-                key={s}
-                onClick={() => onCreate(s)}
-                className="
-                  px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full italic
-                  text-[0.78rem] 2xl:text-base
-                  bg-paper border border-line/70 text-ink-soft
-                  hover:bg-cream-deep transition-colors
-                  focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-                "
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-
-          {/* Secondary mode: a printable infographic instead of an app.
-              Same voice/text overlays, just plumbs `outputKind: "printable"`
-              through to onCreate so the server takes the gpt-image-2 path. */}
-          <div className="flex flex-wrap items-center justify-center gap-2 2xl:gap-3">
-            <button
-              onClick={() =>
-                setComposer({
-                  kind: "voice",
-                  intent: "create",
-                  outputKind: "printable",
-                })
-              }
-              className="
-                inline-flex items-center gap-1.5 px-4 py-2 2xl:px-5 2xl:py-3 rounded-full
-                bg-paper border-2 border-mochi-deep/40 text-mochi-deep font-bold
-                text-[0.85rem] 2xl:text-base
-                hover:bg-mochi-soft hover:border-mochi-deep transition-colors
-                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-              "
-              title="Generate a printable infographic with gpt-image-2"
-            >
-              <Printer className="size-4 2xl:size-5" /> Make a printable
-            </button>
-
-            {/* Type-instead fallback for adults / when voice isn't an option */}
-            <button
-              onClick={() => setComposer({ kind: "text", intent: "create" })}
-              className="
-                inline-flex items-center gap-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full
-                text-[0.78rem] 2xl:text-base text-ink-soft hover:text-ink hover:bg-cream-deep
-                transition-colors
-                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-              "
-            >
-              <Keyboard className="size-3.5 2xl:size-4" /> or type instead
-            </button>
-          </div>
-        </div>
-
-        <div className="px-4 pb-6 sm:pb-8">
-          <h2 className="text-[0.78rem] 2xl:text-[0.92rem] uppercase tracking-[0.22em] text-ink-faint text-center mb-3 2xl:mb-5">
-            Your stuff
-          </h2>
-          {sorted.length === 0 ? (
-            <p className="text-center text-ink-faint italic 2xl:text-lg">
-              No apps yet — tap the mic to make one!
-            </p>
-          ) : (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3 2xl:gap-4 max-w-5xl 2xl:max-w-6xl mx-auto">
-              {sorted.slice(0, 12).map((app) => (
+      {hasApps ? (
+        <>
+          <CompactComposerBar
+            onMic={() => openVoice()}
+            onPrintable={() => openVoice("printable")}
+            onType={openType}
+          />
+          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-6 sm:pb-8">
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 2xl:gap-4 max-w-7xl mx-auto">
+              {sorted.map((app) => (
                 <KidAppTile
                   key={app.id}
                   app={app}
@@ -281,10 +199,88 @@ function KidHome(props: {
                 />
               ))}
             </div>
-          )}
+          </div>
+        </>
+      ) : (
+        <div className="flex-1 overflow-y-auto">
+          <div className="min-h-full flex flex-col items-center justify-center gap-5 sm:gap-6 px-6 py-10">
+            <button
+              onClick={() => openVoice()}
+              aria-label="Tap to talk"
+              autoFocus
+              className="
+                relative inline-flex items-center justify-center
+                size-40 sm:size-52 lg:size-60 2xl:size-72 rounded-full
+                bg-mochi-deep text-paper
+                shadow-[0_18px_40px_-12px_rgba(224,114,107,0.7)]
+                hover:scale-[1.04] active:scale-95 transition-transform
+                focus:outline-none focus-visible:ring-8 focus-visible:ring-mochi-soft
+              "
+            >
+              <span className="absolute inset-0 rounded-full bg-mochi-deep mic-halo" />
+              <Mic
+                className="size-20 sm:size-24 lg:size-28 2xl:size-36 relative"
+                strokeWidth={2}
+              />
+            </button>
+            <p
+              className="font-display text-2xl sm:text-3xl lg:text-4xl 2xl:text-5xl text-ink-soft italic text-center"
+              style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
+            >
+              Tap &amp; talk
+            </p>
+
+            {/* Suggestion chips for first-time users */}
+            <div className="flex flex-wrap items-center justify-center gap-1.5 2xl:gap-2 max-w-2xl">
+              <span className="text-[0.7rem] 2xl:text-[0.85rem] uppercase tracking-[0.18em] text-ink-faint mr-1">
+                try
+              </span>
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  onClick={() => onCreate(s)}
+                  className="
+                    px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full italic
+                    text-[0.78rem] 2xl:text-base
+                    bg-paper border border-line/70 text-ink-soft
+                    hover:bg-cream-deep transition-colors
+                    focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+                  "
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap items-center justify-center gap-2 2xl:gap-3">
+              <button
+                onClick={() => openVoice("printable")}
+                className="
+                  inline-flex items-center gap-1.5 px-4 py-2 2xl:px-5 2xl:py-3 rounded-full
+                  bg-paper border-2 border-mochi-deep/40 text-mochi-deep font-bold
+                  text-[0.85rem] 2xl:text-base
+                  hover:bg-mochi-soft hover:border-mochi-deep transition-colors
+                  focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+                "
+                title="Generate a printable infographic with gpt-image-2"
+              >
+                <Printer className="size-4 2xl:size-5" /> Make a printable
+              </button>
+              <button
+                onClick={openType}
+                className="
+                  inline-flex items-center gap-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full
+                  text-[0.78rem] 2xl:text-base text-ink-soft hover:text-ink hover:bg-cream-deep
+                  transition-colors
+                  focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+                "
+              >
+                <Keyboard className="size-3.5 2xl:size-4" /> or type instead
+              </button>
+            </div>
+          </div>
         </div>
-       </div>
-      </div>
+      )}
 
       {composer.kind === "voice" && (
         <KidMicOverlay
@@ -350,6 +346,79 @@ function KidHome(props: {
           }}
         />
       )}
+    </div>
+  );
+}
+
+/**
+ * Slim mic + secondary actions strip used at the top of the home screen
+ * once the family has at least one app — gives the tile grid the rest of
+ * the screen. Empty state still uses the centered hero mic below.
+ */
+function CompactComposerBar({
+  onMic,
+  onPrintable,
+  onType,
+}: {
+  onMic: () => void;
+  onPrintable: () => void;
+  onType: () => void;
+}) {
+  return (
+    <div
+      className="shrink-0 flex items-center gap-3 px-4 py-3 border-b border-line/60 bg-cream-deep/30 backdrop-blur-sm"
+      style={{ paddingTop: "max(0.75rem, env(safe-area-inset-top))" }}
+    >
+      <button
+        onClick={onMic}
+        aria-label="Tap to talk"
+        autoFocus
+        className="
+          shrink-0 inline-flex items-center justify-center
+          size-14 sm:size-16 2xl:size-20 rounded-full
+          bg-mochi-deep text-paper
+          shadow-[0_8px_20px_-8px_rgba(224,114,107,0.7)]
+          hover:scale-[1.04] active:scale-95 transition-transform
+          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+        "
+      >
+        <Mic className="size-6 sm:size-7 2xl:size-9" strokeWidth={2.4} />
+      </button>
+      <p
+        className="hidden sm:block font-display text-xl 2xl:text-2xl text-ink-soft italic flex-1 truncate"
+        style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
+      >
+        Tap &amp; talk
+      </p>
+      <div className="flex-1 sm:hidden" />
+      <button
+        onClick={onPrintable}
+        title="Generate a printable infographic"
+        className="
+          shrink-0 inline-flex items-center gap-1.5 px-3 py-2 sm:px-4 2xl:px-5 2xl:py-2.5 rounded-full
+          bg-paper border-2 border-mochi-deep/40 text-mochi-deep font-bold
+          text-[0.78rem] 2xl:text-base
+          hover:bg-mochi-soft hover:border-mochi-deep transition-colors
+          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+        "
+      >
+        <Printer className="size-4 2xl:size-5" />
+        <span className="hidden sm:inline">Printable</span>
+      </button>
+      <button
+        onClick={onType}
+        title="Type instead"
+        aria-label="Type instead"
+        className="
+          shrink-0 inline-flex items-center justify-center
+          size-10 sm:size-11 2xl:size-12 rounded-full
+          text-ink-soft hover:text-ink hover:bg-cream-deep
+          transition-colors
+          focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+        "
+      >
+        <Keyboard className="size-4 2xl:size-5" />
+      </button>
     </div>
   );
 }
@@ -431,20 +500,16 @@ function KidAppTile({
         title="More options"
         className="
           absolute top-2 right-2
-          inline-flex items-center justify-center gap-1.5
-          h-11 px-3 lg:h-12 lg:pl-3 lg:pr-3.5 2xl:h-14 2xl:px-4
-          rounded-full
-          bg-mochi-soft text-mochi-deep border border-mochi-deep/30
-          shadow-[0_4px_10px_-4px_rgba(224,114,107,0.5)]
+          inline-flex items-center justify-center
+          size-9 sm:size-10 2xl:size-11 rounded-full
+          bg-paper/85 text-mochi-deep border border-mochi-deep/25
+          shadow-[0_2px_6px_-2px_rgba(42,36,33,0.25)]
           hover:bg-mochi-deep hover:text-paper hover:border-transparent
           active:scale-95 transition-all
           focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft focus-visible:ring-offset-2 focus-visible:ring-offset-paper
         "
       >
-        <MoreHorizontal className="size-5 2xl:size-6" strokeWidth={2.4} />
-        <span className="hidden lg:inline text-[0.78rem] 2xl:text-[0.92rem] font-bold uppercase tracking-[0.14em]">
-          More
-        </span>
+        <MoreHorizontal className="size-4 sm:size-5" strokeWidth={2.4} />
       </button>
     </div>
   );
