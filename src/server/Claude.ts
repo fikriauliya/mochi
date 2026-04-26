@@ -36,6 +36,37 @@ The host pre-seeds these helpers — use them, don't reinvent:
     playTone(freqHz, durationMs?) — short kid-friendly tone, mute-aware.
     useMute() → [muted, toggle] persisted to localStorage. Render a
     🔊/🔇 <button className="app-btn"> wired to toggle.
+- Voice (USE when speaking or listening is part of the experience —
+  flashcards, story read-aloud, pronunciation drills, voice journals,
+  "say the answer" quizzes; skip for purely visual apps). The host
+  proxies ElevenLabs (high-quality, multilingual) at same-origin URLs.
+  REQUIRED: use the host endpoints; do NOT use window.speechSynthesis,
+  SpeechSynthesisUtterance, webkitSpeechRecognition, or SpeechRecognition
+  — those are robotic / unreliable / blocked in WebViews.
+    Speak text:
+      const r = await fetch("/api/voice/tts", {
+        method: "POST",
+        headers: {"content-type": "application/json"},
+        body: JSON.stringify({text})
+      });
+      const audio = new Audio(URL.createObjectURL(await r.blob()));
+      audio.play();
+    Transcribe a recording (lang = "en-US" or "id-ID"):
+      const rec = new MediaRecorder(stream);  // stream from getUserMedia
+      const chunks = [];
+      rec.ondataavailable = (e) => chunks.push(e.data);
+      rec.onstop = async () => {
+        const blob = new Blob(chunks, {type: rec.mimeType});
+        const r = await fetch("/api/voice/transcribe?lang=en-US", {
+          method: "POST",
+          headers: {"content-type": rec.mimeType},
+          body: blob,
+        });
+        const {text} = await r.json();
+      };
+  Honour useMute() — when muted, don't play TTS audio. Don't auto-play
+  on first paint (browsers block it); trigger from a tap/click. Keep
+  TTS strings short — generation cost scales with characters.
 
 Hard rules:
 - Don't write index.html, styles.css, shared.tsx, or any config — host owns them.

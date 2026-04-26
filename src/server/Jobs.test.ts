@@ -7,6 +7,7 @@ import { Effect, Exit, Layer, Stream } from "effect";
 import { BuildLive } from "./Build";
 import { ClaudeService, type ClaudeError } from "./Claude";
 import { JobsLive, JobsService, projectClaudeEvent } from "./Jobs";
+import { NarratorService } from "./Narrator";
 import { OrganizeService } from "./Organize";
 import { PrintableError, PrintableService } from "./Printable";
 import { makeRegistryLive, RegistryService } from "./Registry";
@@ -39,6 +40,15 @@ const StubOrganizeLive = Layer.succeed(
   OrganizeService.of({
     organize: (apps) =>
       Effect.succeed([{ name: "", appIds: apps.map((a) => a.id) }]),
+  }),
+);
+
+// Narrator: tests don't assert narration output, just that wiring works.
+// Returning empty short-circuits the publish so the build stream stays clean.
+const StubNarratorLive = Layer.succeed(
+  NarratorService,
+  NarratorService.of({
+    narrate: () => Effect.succeed(""),
   }),
 );
 
@@ -238,6 +248,7 @@ const TestServices = (
         BuildLive,
         StubPrintableLive,
         StubOrganizeLive,
+        StubNarratorLive,
       ),
     ),
     Layer.provideMerge(BunContext.layer),
@@ -278,7 +289,7 @@ describe("Jobs (end-to-end with mock claude)", () => {
         const r = yield* RegistryService;
         yield* r.upsert(seedApp(id));
         const j = yield* JobsService;
-        yield* j.start(id, "create", "make a counter");
+        yield* j.start(id, "create", "make a counter", "id-ID");
         return yield* waitForTerminalStatus(id);
       }),
       layer,
@@ -309,7 +320,7 @@ describe("Jobs (end-to-end with mock claude)", () => {
         const r = yield* RegistryService;
         yield* r.upsert(seedApp(id));
         const j = yield* JobsService;
-        yield* j.start(id, "create", "make a counter");
+        yield* j.start(id, "create", "make a counter", "id-ID");
         return yield* waitForTerminalStatus(id);
       }),
       layer,
@@ -335,7 +346,7 @@ describe("Jobs (end-to-end with mock claude)", () => {
         const r = yield* RegistryService;
         yield* r.upsert(seedApp(id));
         const j = yield* JobsService;
-        yield* j.start(id, "create", "x");
+        yield* j.start(id, "create", "x", "id-ID");
         return yield* waitForTerminalStatus(id);
       }),
       layer,
@@ -361,7 +372,7 @@ describe("Jobs (end-to-end with mock claude)", () => {
         const r = yield* RegistryService;
         yield* r.upsert(seedApp(id));
         const j = yield* JobsService;
-        yield* j.start(id, "create", "x");
+        yield* j.start(id, "create", "x", "id-ID");
         return yield* waitForTerminalStatus(id);
       }),
       layer,
@@ -395,6 +406,7 @@ describe("Jobs (end-to-end with mock claude)", () => {
           BuildLive,
           StubPrintableLive,
           StubOrganizeLive,
+          StubNarratorLive,
         ),
       ),
       Layer.provideMerge(BunContext.layer),
@@ -405,9 +417,9 @@ describe("Jobs (end-to-end with mock claude)", () => {
         const r = yield* RegistryService;
         yield* r.upsert(seedApp(id));
         const j = yield* JobsService;
-        yield* j.start(id, "create", "x");
+        yield* j.start(id, "create", "x", "id-ID");
         yield* Effect.sleep("50 millis");
-        return yield* j.start(id, "create", "again").pipe(
+        return yield* j.start(id, "create", "again", "id-ID").pipe(
           Effect.catchTag("JobAlreadyRunning", (e) => Effect.succeed(e._tag)),
         );
       }),

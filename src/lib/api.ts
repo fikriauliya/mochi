@@ -1,4 +1,10 @@
-import { BUILD_EVENT_TYPES, type App, type AppKind, type BuildEvent } from "./types";
+import {
+  BUILD_EVENT_TYPES,
+  type App,
+  type AppKind,
+  type BuildEvent,
+  type SpeechLang,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -42,6 +48,7 @@ export const getApp = (id: string): Promise<App> =>
 export const createApp = (input: {
   prompt: string;
   kind?: AppKind;
+  lang?: SpeechLang;
 }): Promise<App> =>
   fetch("/api/apps", {
     method: "POST",
@@ -51,7 +58,7 @@ export const createApp = (input: {
 
 export const modifyApp = (
   id: string,
-  input: { prompt: string },
+  input: { prompt: string; lang?: SpeechLang },
 ): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}/modify`, {
     method: "POST",

@@ -181,7 +181,7 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
               const reg = yield* RegistryService;
               yield* reg.upsert(app);
               const jobs = yield* JobsService;
-              yield* jobs.start(id, "create", parsed.prompt);
+              yield* jobs.start(id, "create", parsed.prompt, parsed.lang ?? "id-ID");
               return okJson(app, 201);
             }),
           ),
@@ -297,7 +297,12 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
               const reg = yield* RegistryService;
               yield* reg.get(req.params.id); // 404 fast if missing
               const jobs = yield* JobsService;
-              yield* jobs.start(req.params.id, "modify", parsed.prompt);
+              yield* jobs.start(
+                req.params.id,
+                "modify",
+                parsed.prompt,
+                parsed.lang ?? "id-ID",
+              );
               // jobs.start has synchronously flipped status="building"; refetch
               // so the response reflects that — otherwise the client's local
               // copy stays "ready" and the build view auto-redirects past us.

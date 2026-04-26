@@ -4,14 +4,15 @@ import { BuildLive } from "./Build";
 import { ClaudeLive } from "./Claude";
 import { makeRoutes, type MochiServices } from "./HttpApi";
 import { JobsLive } from "./Jobs";
+import { NarratorLive } from "./Narrator";
 import { OrganizeLive } from "./Organize";
 import { PrintableLive } from "./Printable";
 import { RegistryLive } from "./Registry";
 import { SuggestLive } from "./Suggest";
 import { VoiceLive } from "./Voice";
 
-// Registry, Claude, Build, Printable, Organize, Suggest, and Voice are
-// siblings; Jobs consumes only the first five (Suggest + Voice are
+// Registry, Claude, Build, Printable, Organize, Narrator, Suggest, and
+// Voice are siblings; Jobs consumes the first six (Suggest + Voice are
 // HTTP-only). Resolved against BunContext at the bottom of the layer stack.
 const Siblings = Layer.mergeAll(
   RegistryLive,
@@ -19,6 +20,7 @@ const Siblings = Layer.mergeAll(
   BuildLive,
   PrintableLive,
   OrganizeLive,
+  NarratorLive,
   SuggestLive,
   VoiceLive,
 );

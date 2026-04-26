@@ -60,8 +60,8 @@ type ShellProps = {
   suggestions: string[];
   view: View;
   currentApp: App | null;
-  onCreate: (prompt: string, kind?: AppKind) => void;
-  onModify: (id: string, prompt: string) => void;
+  onCreate: (prompt: string, kind?: AppKind, lang?: SpeechLang) => void;
+  onModify: (id: string, prompt: string, lang?: SpeechLang) => void;
   onOpenApp: (id: string) => void;
   onBack: () => void;
   onReload: () => void;
@@ -144,8 +144,8 @@ function KidHome(props: {
   apps: App[];
   suggestions: ReadonlyArray<string>;
   onOpenApp: (id: string) => void;
-  onCreate: (prompt: string, kind?: AppKind) => void;
-  onModify: (id: string, prompt: string) => void;
+  onCreate: (prompt: string, kind?: AppKind, lang?: SpeechLang) => void;
+  onModify: (id: string, prompt: string, lang?: SpeechLang) => void;
   onReload: () => void;
 }) {
   const { apps, suggestions, onOpenApp, onCreate, onModify, onReload } = props;
@@ -372,8 +372,9 @@ function KidHome(props: {
           onPrompt={(prompt) => {
             const c = composer;
             setComposer({ kind: "idle" });
-            if (c.intent === "create") onCreate(prompt, c.outputKind ?? "app");
-            else if (c.app) onModify(c.app.id, prompt);
+            if (c.intent === "create")
+              onCreate(prompt, c.outputKind ?? "app", lang);
+            else if (c.app) onModify(c.app.id, prompt, lang);
           }}
         />
       )}
@@ -388,8 +389,9 @@ function KidHome(props: {
           onSubmit={(prompt) => {
             const c = composer;
             setComposer({ kind: "idle" });
-            if (c.intent === "create") onCreate(prompt, c.outputKind ?? "app");
-            else if (c.app) onModify(c.app.id, prompt);
+            if (c.intent === "create")
+              onCreate(prompt, c.outputKind ?? "app", lang);
+            else if (c.app) onModify(c.app.id, prompt, lang);
           }}
         />
       )}
@@ -1167,7 +1169,7 @@ function KidBuildView({
   app: App;
   onBack: () => void;
   onDone: (id: string) => void;
-  onRetry: (id: string, prompt: string) => void;
+  onRetry: (id: string, prompt: string, lang?: SpeechLang) => void;
 }) {
   const [lang] = useSpeechLang();
   const [phase, setPhase] = React.useState<"cooking" | "done" | "error">(
@@ -1192,6 +1194,14 @@ function KidBuildView({
   React.useEffect(() => {
     langRef.current = lang;
   });
+
+  // Lets the SSE callback skip late narrations once we've already moved
+  // past `cooking` — otherwise a stale narration could cancel the
+  // "It's ready!" speech.
+  const phaseRef = React.useRef(phase);
+  React.useEffect(() => {
+    phaseRef.current = phase;
+  }, [phase]);
 
   React.useEffect(() => {
     if (phase !== "cooking") return;
@@ -1218,6 +1228,13 @@ function KidBuildView({
             : "Oops, Mochi got stuck. Try again?",
           cur,
         );
+      } else if (ev.type === "narration") {
+        // Server-generated voice line ("now I'm picking colors!"). Speak
+        // it in whatever language the narrator targeted; ignore stragglers
+        // that race past the terminal event so the done/error speech wins.
+        if (phaseRef.current === "cooking") {
+          speak(ev.text, ev.lang);
+        }
       }
     });
     return () => {
@@ -1237,7 +1254,7 @@ function KidBuildView({
     setEvents([]);
     setErrorMessage("");
     setPhase("cooking");
-    onRetry(app.id, app.prompt);
+    onRetry(app.id, app.prompt, langRef.current);
   };
 
   const headline =
@@ -1353,7 +1370,7 @@ function KidOpenView({
 }: {
   app: App;
   onBack: () => void;
-  onModify: (id: string, prompt: string) => void;
+  onModify: (id: string, prompt: string, lang?: SpeechLang) => void;
 }) {
   const [lang] = useSpeechLang();
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
@@ -1481,7 +1498,7 @@ function KidOpenView({
           }
           onPrompt={(prompt) => {
             setComposer({ kind: "idle" });
-            onModify(app.id, prompt);
+            onModify(app.id, prompt, lang);
           }}
         />
       )}
@@ -1494,7 +1511,7 @@ function KidOpenView({
           onClose={() => setComposer({ kind: "idle" })}
           onSubmit={(prompt) => {
             setComposer({ kind: "idle" });
-            onModify(app.id, prompt);
+            onModify(app.id, prompt, lang);
           }}
         />
       )}

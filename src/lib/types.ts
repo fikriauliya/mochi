@@ -21,6 +21,8 @@ export type App = {
   lastError?: string;
 };
 
+export type SpeechLang = "id-ID" | "en-US";
+
 /** `t` is ms elapsed since the job started, when known. */
 export type BuildEvent =
   | { type: "status"; message: string; t?: number }
@@ -29,7 +31,8 @@ export type BuildEvent =
   | { type: "tool_result"; tool: string; ok: boolean; summary: string; t?: number }
   | { type: "done"; t?: number }
   | { type: "error"; message: string; t?: number }
-  | { type: "raw"; json: string; t?: number };
+  | { type: "raw"; json: string; t?: number }
+  | { type: "narration"; text: string; lang: SpeechLang; t?: number };
 
 /**
  * Every value of `BuildEvent.type`. Kept here so `lib/api.ts` can register
@@ -44,4 +47,5 @@ export const BUILD_EVENT_TYPES: ReadonlyArray<BuildEvent["type"]> = [
   "done",
   "error",
   "raw",
+  "narration",
 ] as const satisfies ReadonlyArray<BuildEvent["type"]>;

@@ -7,7 +7,7 @@ import {
   listSuggestions,
   modifyApp,
 } from "./lib/api";
-import type { App, AppKind } from "./lib/types";
+import type { App, AppKind, SpeechLang } from "./lib/types";
 import "./index.css";
 
 type View =
@@ -105,9 +105,13 @@ export function App() {
   // ---- Actions ----
 
   const onCreate = React.useCallback(
-    async (prompt: string, outputKind: AppKind = "app") => {
+    async (
+      prompt: string,
+      outputKind: AppKind = "app",
+      lang: SpeechLang = "id-ID",
+    ) => {
       try {
-        const app = await createApp({ prompt, kind: outputKind });
+        const app = await createApp({ prompt, kind: outputKind, lang });
         setApps((cur) => [app, ...cur.filter((a) => a.id !== app.id)]);
         navigate({ kind: "build", appId: app.id });
       } catch (e) {
@@ -118,7 +122,7 @@ export function App() {
   );
 
   const onModify = React.useCallback(
-    async (id: string, prompt: string) => {
+    async (id: string, prompt: string, lang: SpeechLang = "id-ID") => {
       // Optimistic: flip status to building and route to the build view
       // immediately, before the HTTP response. We have to update *both*
       // `apps` and `currentApp` here — KidBuildView reads the status on
@@ -135,7 +139,7 @@ export function App() {
       setCurrentApp((cur) => (cur && cur.id === id ? flipBuilding(cur) : cur));
       navigate({ kind: "build", appId: id });
       try {
-        const app = await modifyApp(id, { prompt });
+        const app = await modifyApp(id, { prompt, lang });
         setApps((cur) => cur.map((a) => (a.id === id ? app : a)));
       } catch (e) {
         console.error("modifyApp failed", e);
