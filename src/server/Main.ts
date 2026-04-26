@@ -32,6 +32,10 @@ export const runServer = Effect.gen(function* () {
 
   const server = Bun.serve({
     routes: makeRoutes(runtime) as never,
+    // Long-running SSE streams (build progress) idle for >10s while claude
+    // thinks. Bun's default is 10s — bumping past the 15s heartbeat in
+    // Sse.ts so the connection isn't reaped mid-build.
+    idleTimeout: 60,
     development:
       process.env.NODE_ENV !== "production"
         ? { hmr: true, console: true }

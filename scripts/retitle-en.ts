@@ -13,23 +13,14 @@
  *
  * SQLite WAL mode lets this script write while the server is also reading,
  * but to be safe we open a fresh connection rather than going through the
- * server's HTTP API (no PATCH endpoint exists).
+ * server's HTTP API (no PATCH endpoint exists). The OpenAI call itself is
+ * `fetchEnglishMetadata` from the printable service, so the script and the
+ * server share one implementation.
  */
 import { Database } from "bun:sqlite";
+import { fetchEnglishMetadata } from "../src/server/Printable";
 
 const DB_PATH = "data/mochi.db";
-const OPENAI_CHAT_URL = "https://api.openai.com/v1/chat/completions";
-
-const SYSTEM_PROMPT = `You generate manifest metadata for a family Mochi app or printable.
-
-Respond with a single JSON object, no markdown, no commentary:
-{
-  "name": "<English title in Title Case, ≤60 chars>",
-  "emoji": "<one emoji that fits the topic>",
-  "description": "<English description, ≤120 chars, what it does or shows>"
-}
-
-Translate from any language into English. Do not echo the user's words verbatim — convey the *intent* in natural English. Output JSON only.`;
 
 type Row = {
   id: string;
@@ -38,52 +29,6 @@ type Row = {
   description: string;
   prompt: string;
 };
-
-type Metadata = { name: string; emoji: string; description: string };
-
-async function generateMetadata(
-  apiKey: string,
-  prompt: string,
-): Promise<Metadata> {
-  const res = await fetch(OPENAI_CHAT_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model: "gpt-4o-mini",
-      response_format: { type: "json_object" },
-      max_tokens: 200,
-      temperature: 0.4,
-      messages: [
-        { role: "system", content: SYSTEM_PROMPT },
-        { role: "user", content: prompt },
-      ],
-    }),
-  });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`OpenAI ${res.status}: ${text.slice(0, 300)}`);
-  }
-  const json = (await res.json()) as {
-    choices?: Array<{ message?: { content?: string } }>;
-  };
-  const content = json.choices?.[0]?.message?.content;
-  if (!content) throw new Error("empty response");
-  const parsed = JSON.parse(content) as Partial<Metadata>;
-  const name = (parsed.name ?? "").trim();
-  const emoji = (parsed.emoji ?? "").trim();
-  const description = (parsed.description ?? "").trim();
-  if (!name || !emoji) {
-    throw new Error(`missing name/emoji in ${JSON.stringify(parsed)}`);
-  }
-  return {
-    name: name.slice(0, 60),
-    emoji: emoji.slice(0, 8),
-    description: description.slice(0, 280),
-  };
-}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -126,7 +71,7 @@ async function main() {
   for (const row of rows) {
     process.stdout.write(`  ${row.id}: ${row.name} → `);
     try {
-      const meta = await generateMetadata(apiKey, row.prompt);
+      const meta = await fetchEnglishMetadata(apiKey, row.prompt);
       if (dryRun) {
         console.log(`${meta.emoji} ${meta.name}  (dry-run)`);
       } else {

@@ -1,4 +1,4 @@
-import type { App, AppKind, BuildEvent } from "./types";
+import { BUILD_EVENT_TYPES, type App, type AppKind, type BuildEvent } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -81,12 +81,9 @@ export function subscribeStream(
     }
   };
 
-  source.addEventListener("status", handler("status") as EventListener);
-  source.addEventListener("text", handler("text") as EventListener);
-  source.addEventListener("tool", handler("tool") as EventListener);
-  source.addEventListener("tool_result", handler("tool_result") as EventListener);
-  source.addEventListener("done", handler("done") as EventListener);
-  source.addEventListener("error", handler("error") as EventListener);
+  for (const type of BUILD_EVENT_TYPES) {
+    source.addEventListener(type, handler(type) as EventListener);
+  }
 
   source.onerror = (e) => {
     if (onError) onError(e);

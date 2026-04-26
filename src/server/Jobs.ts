@@ -246,10 +246,31 @@ export const JobsLive = Layer.effect(
                 : "Mochi is sketching your printable…",
           });
 
-          const tImgStart = Date.now();
-          const png = yield* printable.generatePng(fullPrompt);
+          // Image and metadata are independent OpenAI calls — fan them out.
+          // Image dominates the wall clock (~10s); metadata (~1-2s) hides
+          // entirely behind it. On metadata failure we fall back to a
+          // server-derived title so the printable still ships.
+          const tStart = Date.now();
+          const { png, manifest } = yield* Effect.all(
+            {
+              png: printable.generatePng(fullPrompt),
+              manifest: printable.generateMetadata(fullPrompt).pipe(
+                Effect.tapError((cause) =>
+                  Effect.logWarning(
+                    `[build ${id}] metadata gen failed: ${cause.message} — using derived title`,
+                  ),
+                ),
+                Effect.orElseSucceed(() => ({
+                  name: deriveTitle(fullPrompt),
+                  emoji: "🖨",
+                  description: fullPrompt.slice(0, 280),
+                })),
+              ),
+            },
+            { concurrency: 2 },
+          );
           yield* Effect.log(
-            `[build ${id}] gpt-image-2 returned ${png.byteLength} bytes in ${Date.now() - tImgStart}ms`,
+            `[build ${id}] gpt-image-2 + gpt-4o-mini returned in ${Date.now() - tStart}ms (${png.byteLength} bytes)`,
           );
           yield* publish({
             type: "status",
@@ -267,27 +288,6 @@ export const JobsLive = Layer.effect(
                   }),
               ),
             );
-
-          // Generate the manifest in English via gpt-4o-mini. If the call
-          // fails (rate limit, missing key, transient network), fall back to
-          // a server-derived title so the printable still ships — the user
-          // can always rename later.
-          yield* publish({
-            type: "status",
-            message: "Naming your printable…",
-          });
-          const manifest = yield* printable.generateMetadata(fullPrompt).pipe(
-            Effect.tapError((cause) =>
-              Effect.logWarning(
-                `[build ${id}] metadata gen failed: ${cause.message} — using derived title`,
-              ),
-            ),
-            Effect.orElseSucceed(() => ({
-              name: deriveTitle(fullPrompt),
-              emoji: "🖨",
-              description: fullPrompt.slice(0, 280),
-            })),
-          );
 
           yield* fs
             .writeFileString(

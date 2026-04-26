@@ -608,6 +608,68 @@ function KidAppMenu(props: {
   );
 }
 
+/* ------------- composer copy: keep all the intent×kind×lang strings ------------- */
+
+function listeningPlaceholder(
+  intent: "create" | "modify",
+  outputKind: AppKind,
+): string {
+  if (intent === "modify") return "What should change?";
+  return outputKind === "printable"
+    ? "What should I make to print?"
+    : "I'm listening…";
+}
+
+function confirmUtterance(
+  intent: "create" | "modify",
+  outputKind: AppKind,
+  lang: SpeechLang,
+): string {
+  if (intent === "modify") {
+    return lang === "id-ID" ? "Oke, Mochi update ya!" : "Okay, updating it!";
+  }
+  if (outputKind === "printable") {
+    return lang === "id-ID"
+      ? "Sebentar ya, Mochi lagi gambar!"
+      : "Hold on, Mochi is sketching!";
+  }
+  return lang === "id-ID"
+    ? "Sebentar ya, Mochi lagi bikin!"
+    : "Hold on, Mochi is making it!";
+}
+
+function confirmLabel(
+  intent: "create" | "modify",
+  outputKind: AppKind,
+  short = false,
+): string {
+  if (intent === "modify") return short ? "Change it" : "Update it!";
+  if (outputKind === "printable") return short ? "Make it" : "Make it!";
+  return short ? "Build it" : "Build it!";
+}
+
+function typeOverlayTitle(
+  intent: "create" | "modify",
+  outputKind: AppKind,
+  target?: App,
+): string {
+  if (intent === "modify") return `Change ${target?.name ?? "the app"}`;
+  return outputKind === "printable"
+    ? "What should Mochi print?"
+    : "What should Mochi build?";
+}
+
+function typeOverlayPlaceholder(
+  intent: "create" | "modify",
+  outputKind: AppKind,
+): string {
+  if (intent === "modify")
+    return "e.g. make the buttons purple, add a high-score";
+  return outputKind === "printable"
+    ? "e.g. a chore chart with stickers, a multiplication table"
+    : "e.g. a flashcard quiz about animals";
+}
+
 /* ----------------------------- Mic overlay ----------------------------- */
 
 function KidMicOverlay({
@@ -657,30 +719,14 @@ function KidMicOverlay({
 
   const live = speech.transcript.trim();
   const display =
-    phase === "listening"
-      ? [accumulated, live].filter(Boolean).join(" ").trim() ||
-        (intent === "create"
-          ? outputKind === "printable"
-            ? "What should I make to print?"
-            : "I'm listening…"
-          : "What should change?")
-      : accumulated;
+    phase === "review"
+      ? accumulated
+      : [accumulated, live].filter(Boolean).join(" ").trim() ||
+        listeningPlaceholder(intent, outputKind);
 
   const confirm = () => {
     if (!accumulated.trim()) return;
-    const utterance =
-      intent === "create"
-        ? outputKind === "printable"
-          ? lang === "id-ID"
-            ? "Sebentar ya, Mochi lagi gambar!"
-            : "Hold on, Mochi is sketching!"
-          : lang === "id-ID"
-            ? "Sebentar ya, Mochi lagi bikin!"
-            : "Hold on, Mochi is making it!"
-        : lang === "id-ID"
-          ? "Oke, Mochi update ya!"
-          : "Okay, updating it!";
-    speak(utterance, lang);
+    speak(confirmUtterance(intent, outputKind, lang), lang);
     onPrompt(accumulated.trim());
   };
 
@@ -738,11 +784,7 @@ function KidMicOverlay({
             ) : (
               <Sparkles className="size-5 2xl:size-6" />
             )}
-            {intent === "create"
-              ? outputKind === "printable"
-                ? "Make it!"
-                : "Build it!"
-              : "Update it!"}
+            {confirmLabel(intent, outputKind)}
           </button>
 
           <div className="flex flex-wrap items-center justify-center gap-3 w-full">
@@ -846,19 +888,8 @@ function KidTypeOverlay({
     onSubmit(trimmed);
   };
 
-  const title =
-    intent === "create"
-      ? outputKind === "printable"
-        ? "What should Mochi print?"
-        : "What should Mochi build?"
-      : `Change ${target?.name ?? "the app"}`;
-
-  const placeholder =
-    intent === "create"
-      ? outputKind === "printable"
-        ? "e.g. a chore chart with stickers, a multiplication table"
-        : "e.g. a flashcard quiz about animals"
-      : `e.g. make the buttons purple, add a high-score`;
+  const title = typeOverlayTitle(intent, outputKind, target);
+  const placeholder = typeOverlayPlaceholder(intent, outputKind);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -933,11 +964,7 @@ function KidTypeOverlay({
             ) : (
               <Sparkles className="size-4" />
             )}
-            {intent === "create"
-              ? outputKind === "printable"
-                ? "Make it"
-                : "Build it"
-              : "Change it"}
+            {confirmLabel(intent, outputKind, true)}
           </button>
           <button
             onClick={onClose}
@@ -1146,7 +1173,6 @@ function KidOpenView({
   onBack: () => void;
   onModify: (id: string, prompt: string) => void;
 }) {
-  const [iframeKey] = React.useState(0);
   const [lang] = useSpeechLang();
   const iframeRef = React.useRef<HTMLIFrameElement>(null);
   const isPrintable = app.kind === "printable";
@@ -1248,8 +1274,7 @@ function KidOpenView({
 
       <iframe
         ref={iframeRef}
-        key={iframeKey}
-        src={`/apps/${app.id}/?t=${iframeKey}`}
+        src={`/apps/${app.id}/`}
         title={app.name}
         sandbox={
           // Printables need `allow-modals` so window.print() opens the
