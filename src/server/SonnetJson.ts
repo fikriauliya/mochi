@@ -1,19 +1,24 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { Data, Effect } from "effect";
+import { resolveModelId, useApi } from "./ClaudeBackend";
 
 /**
- * One-shot `claude --print --output-format=json --json-schema=…` calls,
- * shared by `Organize.ts` and `Suggest.ts`. Both want:
+ * One-shot structured-output calls, shared by Organize / Suggest /
+ * Narrator. Two backends behind one entry point — `MOCHI_CLAUDE_BACKEND`
+ * picks at runtime.
  *
- *   - sonnet at low effort, no MCP, no plugins, no tools, no skills
- *   - a strict json schema constraining the response
- *   - the subprocess killed on interrupt / timeout / failure (otherwise
- *     a stuck claude leaks past the calling Effect)
- *   - a defensive walk to find the schema-validated payload (claude
- *     lands it at `.structured_output`; older versions used `.result`)
+ *   cli (default): `claude --print --output-format=json --json-schema=…`
+ *     subprocess. No API key, uses claude code login.
+ *   api: Anthropic Messages API with a forced `tool_use` whose
+ *     `input_schema` IS the json schema. Faster TTFB, no subprocess
+ *     overhead. Requires ANTHROPIC_API_KEY.
+ *
+ * Both return the same { structured_output } envelope so
+ * `unwrapStructured` works without branching downstream.
  *
  * The streaming app-build path (Claude.ts) is intentionally separate —
- * it owns a session id, supports `--resume`, captures stderr through a
- * Ref, and decodes JSONL one line at a time.
+ * it owns a session id, supports `--resume`, and decodes JSONL events
+ * one line at a time.
  */
 
 export class SonnetJsonError extends Data.TaggedError("SonnetJsonError")<{
@@ -32,12 +37,18 @@ export type SonnetJsonOptions = {
 };
 
 /**
- * Spawn claude, wait for it, return the parsed top-level JSON response
- * (still `unknown` — caller validates shape with `unwrapStructured`
- * + a field check). `acquireUseRelease` guarantees the subprocess is
- * killed on every exit path.
+ * Returns the parsed top-level JSON response (still `unknown` — caller
+ * validates shape with `unwrapStructured` + a field check). Dispatches
+ * on `MOCHI_CLAUDE_BACKEND`; both implementations wrap the validated
+ * payload in `{ structured_output }` so the caller doesn't branch.
  */
 export function callJsonSchema(
+  opts: SonnetJsonOptions,
+): Effect.Effect<unknown, SonnetJsonError> {
+  return useApi() ? callViaApi(opts) : callViaCli(opts);
+}
+
+function callViaCli(
   opts: SonnetJsonOptions,
 ): Effect.Effect<unknown, SonnetJsonError> {
   return Effect.acquireUseRelease(
@@ -100,6 +111,50 @@ export function callJsonSchema(
         }
       }),
   );
+}
+
+function callViaApi(
+  opts: SonnetJsonOptions,
+): Effect.Effect<unknown, SonnetJsonError> {
+  return Effect.tryPromise({
+    try: async () => {
+      const apiKey = process.env["ANTHROPIC_API_KEY"];
+      if (!apiKey) {
+        throw new Error(
+          "MOCHI_CLAUDE_BACKEND=api requires ANTHROPIC_API_KEY in .env",
+        );
+      }
+      const client = new Anthropic({ apiKey });
+      const inputSchema = JSON.parse(opts.schema) as Record<string, unknown>;
+      const res = await client.messages.create({
+        model: resolveModelId(opts.model ?? "sonnet"),
+        max_tokens: 1024,
+        // Force the model to call this single tool whose input_schema is
+        // exactly our json schema — Anthropic validates the args against
+        // it, giving us schema-conformant structured output.
+        tools: [
+          {
+            name: "respond",
+            description: "Send the structured response.",
+            input_schema: inputSchema as Anthropic.Tool.InputSchema,
+          },
+        ],
+        tool_choice: { type: "tool", name: "respond" },
+        messages: [{ role: "user", content: opts.prompt }],
+      });
+      const block = res.content.find((b) => b.type === "tool_use");
+      if (!block || block.type !== "tool_use") {
+        throw new Error("API returned no tool_use block");
+      }
+      // Wrap so `unwrapStructured()` works downstream without branching.
+      return { structured_output: block.input };
+    },
+    catch: (cause) =>
+      new SonnetJsonError({
+        message: cause instanceof Error ? cause.message : String(cause),
+        cause,
+      }),
+  });
 }
 
 /**

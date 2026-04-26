@@ -1,29 +1,28 @@
+import Anthropic from "@anthropic-ai/sdk";
 import { Context, Data, Effect, Layer } from "effect";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { resolveModelId, useApi } from "./ClaudeBackend";
 import { unwrapStructured } from "./SonnetJson";
 
 /**
- * Reverse-engineer a printed worksheet, coloring page, maze, sticker
- * chart, etc. into a spec for an interactive web-app version. The kid
- * snaps a photo with the host's camera; we hand the image to claude
- * (Opus 4.7 by default, vision-capable) via `claude --print` with the
- * `Read` tool allowed and a JSON schema enforcing the output shape.
+ * Reverse-engineer a printed worksheet / coloring page / maze into a
+ * spec for an interactive web-app version. Two backends behind one
+ * Effect entry point — `MOCHI_CLAUDE_BACKEND` picks at runtime.
  *
- * Why the CLI instead of the Anthropic API: the `claude` CLI is already
- * authenticated through claude code login, so this works on a fresh
- * checkout without provisioning ANTHROPIC_API_KEY. Same model, same
- * vision capability — the trade-off is one extra Read-tool round trip
- * (≈half a second) for zero env setup.
+ *   cli (default): stage the photo in a unique temp dir, spawn
+ *     `claude --print --model opus --tools Read --json-schema …` with
+ *     that dir as cwd. Claude reads the file via the Read tool and
+ *     returns structured output. No API key — uses claude code login.
+ *     Trade-off: ~+0.5s for the Read round trip and a temp-file dance.
  *
- * The image is staged in a unique temp directory; claude is launched
- * with that directory as its cwd and instructed to read the file there.
- * Both the subprocess and the temp dir are scoped via
- * `Effect.acquireUseRelease`, so they're cleaned up on every exit path.
+ *   api: post directly to `/v1/messages` with an `image` content block
+ *     and a forced `tool_use` whose `input_schema` IS our schema. No
+ *     temp file, no Read tool round trip. Requires ANTHROPIC_API_KEY.
  *
- * Override the model with MOCHI_VISION_MODEL=sonnet (or a full id) if
- * Opus's pricing or latency is too heavy for a 1MP photo.
+ * Override the model with MOCHI_VISION_MODEL=sonnet if Opus's latency
+ * or pricing is too heavy for a 1MP photo.
  */
 
 export class VisionError extends Data.TaggedError("VisionError")<{
@@ -98,137 +97,241 @@ function readField(rec: Record<string, unknown>, key: string): string {
   return typeof v === "string" ? v.trim() : "";
 }
 
+const ALLOWED_MEDIA_TYPES = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/gif",
+  "image/webp",
+]);
+
+type WorksheetFields = {
+  name: string;
+  emoji: string;
+  description: string;
+  spec: string;
+};
+
+function buildScan(
+  fields: WorksheetFields,
+  image: Uint8Array,
+  mimeType: string,
+  model: string,
+  t0: number,
+): Effect.Effect<WorksheetScan, VisionError> {
+  return Effect.gen(function* () {
+    if (!fields.spec) {
+      return yield* Effect.fail(
+        new VisionError({ message: "vision returned empty spec" }),
+      );
+    }
+    yield* Effect.log(
+      `[vision] ${image.byteLength}B (${mimeType}) → "${fields.name}" in ${Date.now() - t0}ms · ${model}`,
+    );
+    return {
+      name: fields.name.slice(0, 60) || "Worksheet",
+      emoji: fields.emoji.slice(0, 8) || "📋",
+      description: fields.description.slice(0, 280),
+      spec: fields.spec,
+    };
+  });
+}
+
+function fieldsFromRecord(structured: Record<string, unknown>): WorksheetFields {
+  return {
+    name: readField(structured, "name"),
+    emoji: readField(structured, "emoji"),
+    description: readField(structured, "description"),
+    spec: readField(structured, "spec"),
+  };
+}
+
+function scanViaCli(
+  image: Uint8Array,
+  mimeType: string,
+): Effect.Effect<WorksheetScan, VisionError> {
+  return Effect.acquireUseRelease(
+    Effect.sync(() => {
+      const dir = mkdtempSync(join(tmpdir(), "mochi-scan-"));
+      const filename = `worksheet.${extFromMime(mimeType)}`;
+      writeFileSync(join(dir, filename), image);
+      return { dir, filename };
+    }),
+    ({ dir, filename }) =>
+      Effect.gen(function* () {
+        const model = process.env["MOCHI_VISION_MODEL"] ?? DEFAULT_MODEL;
+        const t0 = Date.now();
+
+        const stdout = yield* Effect.acquireUseRelease(
+          Effect.sync(() =>
+            Bun.spawn(
+              [
+                "claude",
+                "--print",
+                "--model",
+                model,
+                "--effort",
+                "low",
+                "--output-format",
+                "json",
+                "--json-schema",
+                SCAN_SCHEMA,
+                "--permission-mode",
+                "bypassPermissions",
+                // Just Read — claude reads the image file we staged
+                // in cwd. `--strict-mcp-config` (boolean) terminates
+                // the variadic `--tools` so the prompt isn't slurped.
+                "--tools",
+                "Read",
+                "--strict-mcp-config",
+                "--mcp-config",
+                '{"mcpServers":{}}',
+                "--disable-slash-commands",
+                "--setting-sources",
+                "",
+                "--exclude-dynamic-system-prompt-sections",
+                `${VISION_PROMPT}\n\n(The image to read is ./${filename} in your current directory.)`,
+              ],
+              { cwd: dir, stdout: "pipe", stderr: "pipe" },
+            ),
+          ),
+          (proc) =>
+            Effect.tryPromise({
+              try: async () => {
+                const out = await new Response(proc.stdout).text();
+                const code = await proc.exited;
+                if (code !== 0) {
+                  const err = await new Response(proc.stderr).text();
+                  throw new Error(
+                    `claude exited ${code}: ${err.slice(0, 500)}`,
+                  );
+                }
+                return out;
+              },
+              catch: (cause) =>
+                new VisionError({
+                  message:
+                    cause instanceof Error ? cause.message : String(cause),
+                  cause,
+                }),
+            }),
+          (proc) =>
+            Effect.sync(() => {
+              try {
+                proc.kill();
+              } catch {
+                /* already exited */
+              }
+            }),
+        );
+
+        const parsedTop = yield* Effect.try({
+          try: () => JSON.parse(stdout) as unknown,
+          catch: (cause) =>
+            new VisionError({ message: "claude stdout not JSON", cause }),
+        });
+        const structured = unwrapStructured(parsedTop);
+        if (!structured) {
+          return yield* Effect.fail(
+            new VisionError({
+              message: "no structured_output in claude response",
+            }),
+          );
+        }
+        return yield* buildScan(
+          fieldsFromRecord(structured),
+          image,
+          mimeType,
+          model,
+          t0,
+        );
+      }),
+    ({ dir }) =>
+      Effect.sync(() => {
+        try {
+          rmSync(dir, { recursive: true, force: true });
+        } catch {
+          /* best-effort */
+        }
+      }),
+  );
+}
+
+function scanViaApi(
+  image: Uint8Array,
+  mimeType: string,
+): Effect.Effect<WorksheetScan, VisionError> {
+  return Effect.gen(function* () {
+    const apiKey = process.env["ANTHROPIC_API_KEY"];
+    if (!apiKey) {
+      return yield* Effect.fail(
+        new VisionError({
+          message:
+            "MOCHI_CLAUDE_BACKEND=api requires ANTHROPIC_API_KEY in .env",
+        }),
+      );
+    }
+    const mediaType = (
+      ALLOWED_MEDIA_TYPES.has(mimeType) ? mimeType : "image/jpeg"
+    ) as "image/jpeg" | "image/png" | "image/gif" | "image/webp";
+    const model = resolveModelId(
+      process.env["MOCHI_VISION_MODEL"] ?? DEFAULT_MODEL,
+    );
+    const t0 = Date.now();
+
+    const inputSchema = JSON.parse(SCAN_SCHEMA) as Record<string, unknown>;
+    const fields = yield* Effect.tryPromise({
+      try: async () => {
+        const client = new Anthropic({ apiKey });
+        const res = await client.messages.create({
+          model,
+          max_tokens: 1024,
+          tools: [
+            {
+              name: "scan_result",
+              description:
+                "Send the structured scan result for this worksheet.",
+              input_schema: inputSchema as Anthropic.Tool.InputSchema,
+            },
+          ],
+          tool_choice: { type: "tool", name: "scan_result" },
+          messages: [
+            {
+              role: "user",
+              content: [
+                {
+                  type: "image",
+                  source: {
+                    type: "base64",
+                    media_type: mediaType,
+                    data: Buffer.from(image).toString("base64"),
+                  },
+                },
+                { type: "text", text: VISION_PROMPT },
+              ],
+            },
+          ],
+        });
+        const block = res.content.find((b) => b.type === "tool_use");
+        if (!block || block.type !== "tool_use") {
+          throw new Error("API returned no tool_use block");
+        }
+        return fieldsFromRecord(block.input as Record<string, unknown>);
+      },
+      catch: (cause) =>
+        new VisionError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    });
+
+    return yield* buildScan(fields, image, mimeType, model, t0);
+  });
+}
+
 export const VisionLive = Layer.succeed(
   VisionService,
   VisionService.of({
     scanWorksheet: (image, mimeType) =>
-      Effect.acquireUseRelease(
-        Effect.sync(() => {
-          const dir = mkdtempSync(join(tmpdir(), "mochi-scan-"));
-          const filename = `worksheet.${extFromMime(mimeType)}`;
-          writeFileSync(join(dir, filename), image);
-          return { dir, filename };
-        }),
-        ({ dir, filename }) =>
-          Effect.gen(function* () {
-            const model =
-              process.env["MOCHI_VISION_MODEL"] ?? DEFAULT_MODEL;
-            const t0 = Date.now();
-
-            const stdout = yield* Effect.acquireUseRelease(
-              Effect.sync(() =>
-                Bun.spawn(
-                  [
-                    "claude",
-                    "--print",
-                    "--model",
-                    model,
-                    "--effort",
-                    "low",
-                    "--output-format",
-                    "json",
-                    "--json-schema",
-                    SCAN_SCHEMA,
-                    "--permission-mode",
-                    "bypassPermissions",
-                    // Just Read — claude reads the image file we staged
-                    // in cwd. `--strict-mcp-config` (boolean) terminates
-                    // the variadic `--tools` so the prompt isn't slurped.
-                    "--tools",
-                    "Read",
-                    "--strict-mcp-config",
-                    "--mcp-config",
-                    '{"mcpServers":{}}',
-                    "--disable-slash-commands",
-                    "--setting-sources",
-                    "",
-                    "--exclude-dynamic-system-prompt-sections",
-                    `${VISION_PROMPT}\n\n(The image to read is ./${filename} in your current directory.)`,
-                  ],
-                  { cwd: dir, stdout: "pipe", stderr: "pipe" },
-                ),
-              ),
-              (proc) =>
-                Effect.tryPromise({
-                  try: async () => {
-                    const out = await new Response(proc.stdout).text();
-                    const code = await proc.exited;
-                    if (code !== 0) {
-                      const err = await new Response(proc.stderr).text();
-                      throw new Error(
-                        `claude exited ${code}: ${err.slice(0, 500)}`,
-                      );
-                    }
-                    return out;
-                  },
-                  catch: (cause) =>
-                    new VisionError({
-                      message:
-                        cause instanceof Error
-                          ? cause.message
-                          : String(cause),
-                      cause,
-                    }),
-                }),
-              (proc) =>
-                Effect.sync(() => {
-                  try {
-                    proc.kill();
-                  } catch {
-                    /* already exited */
-                  }
-                }),
-            );
-
-            const parsedTop = yield* Effect.try({
-              try: () => JSON.parse(stdout) as unknown,
-              catch: (cause) =>
-                new VisionError({
-                  message: "claude stdout not JSON",
-                  cause,
-                }),
-            });
-            const structured = unwrapStructured(parsedTop);
-            if (!structured) {
-              return yield* Effect.fail(
-                new VisionError({
-                  message: "no structured_output in claude response",
-                }),
-              );
-            }
-
-            const spec = readField(structured, "spec");
-            if (!spec) {
-              return yield* Effect.fail(
-                new VisionError({ message: "vision returned empty spec" }),
-              );
-            }
-
-            const name = readField(structured, "name").slice(0, 60);
-            const emoji = readField(structured, "emoji").slice(0, 8);
-            const description = readField(structured, "description").slice(
-              0,
-              280,
-            );
-
-            yield* Effect.log(
-              `[vision] ${image.byteLength}B (${mimeType}) → "${name}" in ${Date.now() - t0}ms · ${model}`,
-            );
-            return {
-              name: name || "Worksheet",
-              emoji: emoji || "📋",
-              description,
-              spec,
-            };
-          }),
-        ({ dir }) =>
-          Effect.sync(() => {
-            try {
-              rmSync(dir, { recursive: true, force: true });
-            } catch {
-              /* best-effort */
-            }
-          }),
-      ),
+      useApi() ? scanViaApi(image, mimeType) : scanViaCli(image, mimeType),
   }),
 );

@@ -1,5 +1,7 @@
+import { query } from "@anthropic-ai/claude-agent-sdk";
 import { Command, CommandExecutor } from "@effect/platform";
 import { Context, Data, Effect, Layer, Ref, Schema as S, Scope, Stream } from "effect";
+import { resolveModelId, useApi } from "./ClaudeBackend";
 import { ClaudeStreamEvent } from "./Schema";
 
 export class ClaudeError extends Data.TaggedError("ClaudeError")<{
@@ -105,152 +107,239 @@ export class ClaudeService extends Context.Tag("ClaudeService")<
   }
 >() {}
 
+/**
+ * SDK-backed spawn. The Claude Agent SDK's `query()` returns an
+ * AsyncGenerator of `SDKMessage` whose discriminator + outer shape
+ * match our `ClaudeStreamEvent` schema (both have a `type` field plus
+ * `message.content` for assistant/user variants), so `Jobs.ts`'s
+ * projector works without branching.
+ *
+ * `Effect.acquireRelease` ties the query handle to the surrounding
+ * scope so an in-flight build is interrupted cleanly when the SSE
+ * subscriber drops.
+ */
+function spawnViaSdk(
+  args: ClaudeSpawnArgs,
+): Effect.Effect<
+  Stream.Stream<ClaudeStreamEvent, ClaudeError>,
+  ClaudeError,
+  Scope.Scope
+> {
+  return Effect.gen(function* () {
+    if (!process.env["ANTHROPIC_API_KEY"]) {
+      return yield* Effect.fail(
+        new ClaudeError({
+          message:
+            "MOCHI_CLAUDE_BACKEND=api requires ANTHROPIC_API_KEY in .env",
+        }),
+      );
+    }
+    const model = process.env["MOCHI_CLAUDE_MODEL"] ?? "sonnet";
+    const effort = (process.env["MOCHI_CLAUDE_EFFORT"] ?? "low") as
+      | "low"
+      | "medium"
+      | "high"
+      | "xhigh"
+      | "max";
+
+    const queryHandle = yield* Effect.acquireRelease(
+      Effect.sync(() =>
+        query({
+          prompt: args.prompt,
+          options: {
+            cwd: args.cwd,
+            model: resolveModelId(model),
+            effort,
+            permissionMode: "bypassPermissions",
+            allowDangerouslySkipPermissions: true,
+            tools: ["Read", "Write", "Edit"],
+            mcpServers: {},
+            strictMcpConfig: true,
+            settingSources: [],
+            includePartialMessages: true,
+            sessionId: args.sessionId,
+            ...(args.resume
+              ? { resume: args.sessionId }
+              : { appendSystemPrompt: SYSTEM_PROMPT }),
+          },
+        }),
+      ),
+      (q) =>
+        Effect.promise(() =>
+          q.interrupt().catch(() => {
+            /* already finished */
+          }),
+        ),
+    );
+
+    return Stream.fromAsyncIterable(
+      queryHandle,
+      (cause) =>
+        new ClaudeError({
+          message: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    ) as unknown as Stream.Stream<ClaudeStreamEvent, ClaudeError>;
+  });
+}
+
 export const ClaudeLive = Layer.effect(
   ClaudeService,
   Effect.gen(function* () {
     const executor = yield* CommandExecutor.CommandExecutor;
 
     return ClaudeService.of({
-      spawn: ({ cwd, sessionId, resume, prompt }) =>
-        Effect.gen(function* () {
-          // Default to sonnet — ~40% cheaper than opus and noticeably faster
-          // at TTFT on these short, write-heavy prompts. Override with
-          // MOCHI_CLAUDE_MODEL=opus (or a full model id) in .env if you want
-          // higher-quality output for a specific session.
-          const model = process.env["MOCHI_CLAUDE_MODEL"] ?? "sonnet";
-          // Effort controls extended-thinking depth. Sonnet with the
-          // default level will spend many minutes generating reasoning
-          // tokens before issuing tool calls — too much for a short app
-          // build. "low" still produces solid output; bump to medium/high
-          // via MOCHI_CLAUDE_EFFORT if you need the agent to think harder.
-          const effort = process.env["MOCHI_CLAUDE_EFFORT"] ?? "low";
-          const args = [
-            "--print",
-            "--model",
-            model,
-            "--effort",
-            effort,
-            "--output-format",
-            "stream-json",
-            "--include-partial-messages",
-            "--permission-mode",
-            "bypassPermissions",
-            "--verbose",
-            // Token-efficiency: the agent only needs to read existing files
-            // and write index.tsx + manifest.json. `--tools` restricts the
-            // built-in set, but it does NOT prevent MCP-served tools or
-            // plugin-injected tools from showing up — those slip in via the
-            // user's settings.json (Figma/Gmail/Calendar/Drive/Playwright/
-            // gopls/rust-analyzer plugins, etc.). The combined flags below
-            // strip the agent's tool list down to just Read/Write/Edit:
-            //   --tools                 — narrow the built-ins
-            //   --strict-mcp-config +   — ignore every MCP source other
-            //   --mcp-config '{}'         than this empty one
-            //   --disable-slash-commands — skip skills (no /skill resolution)
-            //   --setting-sources ""    — don't load user/project/local
-            //                             plugins or agent definitions
-            "--tools",
-            "Write,Edit,Read",
-            "--strict-mcp-config",
-            "--mcp-config",
-            '{"mcpServers":{}}',
-            "--disable-slash-commands",
-            "--setting-sources",
-            "",
-            // Move per-machine sections (cwd/env/git status) out of the cached
-            // system prompt so the static prefix is reused across builds.
-            "--exclude-dynamic-system-prompt-sections",
-          ];
-          if (resume) {
-            args.push("--resume", sessionId);
-          } else {
-            args.push("--session-id", sessionId);
-            args.push("--append-system-prompt", SYSTEM_PROMPT);
-          }
-          args.push(prompt);
-
-          const command = Command.make("claude", ...args).pipe(
-            Command.workingDirectory(cwd),
-          );
-
-          // Start the process inside its own scope so .stdout / .stderr / .kill
-          // are all wired to the same lifetime owned by the caller.
-          const child = yield* executor.start(command).pipe(
-            Effect.mapError(
-              (cause) =>
-                new ClaudeError({
-                  message: "failed to start `claude` subprocess",
-                  cause,
-                }),
-            ),
-          );
-
-          // Capture stderr into a ref so we can include it in error reports.
-          const stderrRef = yield* Ref.make("");
-          yield* Stream.runForEach(child.stderr, (chunk) =>
-            Ref.update(stderrRef, (s) => s + new TextDecoder().decode(chunk)),
-          ).pipe(
-            Effect.catchAll(() => Effect.void),
-            Effect.forkScoped,
-          );
-
-          const events: Stream.Stream<ClaudeStreamEvent, ClaudeError> = child.stdout.pipe(
-            Stream.decodeText("utf8"),
-            Stream.splitLines,
-            Stream.filter((line) => line.trim().length > 0),
-            Stream.mapEffect((line) =>
-              Effect.try({
-                try: () => JSON.parse(line) as unknown,
-                catch: (cause) =>
-                  new ClaudeError({
-                    message: `non-JSON line on claude stdout: ${line.slice(0, 120)}`,
-                    cause,
-                  }),
-              }).pipe(
-                Effect.flatMap((u) =>
-                  decodeEvent(u).pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new ClaudeError({
-                          message: "claude stdout event failed schema",
-                          cause,
-                        }),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-            Stream.mapError((e) =>
-              e instanceof ClaudeError ? e : new ClaudeError({ message: String(e) }),
-            ),
-            // After stdout closes, check exit code and fail if non-zero.
-            Stream.concat(
-              Stream.unwrap(
-                Effect.gen(function* () {
-                  const code = yield* child.exitCode.pipe(
-                    Effect.mapError(
-                      (cause) =>
-                        new ClaudeError({
-                          message: "could not read claude exit code",
-                          cause,
-                        }),
-                    ),
-                  );
-                  if (code === 0) return Stream.empty as Stream.Stream<ClaudeStreamEvent, ClaudeError>;
-                  const stderr = yield* Ref.get(stderrRef);
-                  return Stream.fail(
-                    new ClaudeError({
-                      message: `claude exited with code ${code}`,
-                      stderr: stderr.slice(-2000),
-                    }),
-                  ) as Stream.Stream<ClaudeStreamEvent, ClaudeError>;
-                }),
-              ),
-            ),
-          );
-
-          return events;
-        }),
+      spawn: (args) =>
+        useApi() ? spawnViaSdk(args) : spawnViaCli(executor, args),
     });
   }),
 );
+
+function spawnViaCli(
+  executor: CommandExecutor.CommandExecutor,
+  { cwd, sessionId, resume, prompt }: ClaudeSpawnArgs,
+): Effect.Effect<
+  Stream.Stream<ClaudeStreamEvent, ClaudeError>,
+  ClaudeError,
+  Scope.Scope
+> {
+  return Effect.gen(function* () {
+    // Default to sonnet — ~40% cheaper than opus and noticeably faster
+    // at TTFT on these short, write-heavy prompts. Override with
+    // MOCHI_CLAUDE_MODEL=opus (or a full model id) in .env if you want
+    // higher-quality output for a specific session.
+    const model = process.env["MOCHI_CLAUDE_MODEL"] ?? "sonnet";
+    // Effort controls extended-thinking depth. Sonnet with the
+    // default level will spend many minutes generating reasoning
+    // tokens before issuing tool calls — too much for a short app
+    // build. "low" still produces solid output; bump to medium/high
+    // via MOCHI_CLAUDE_EFFORT if you need the agent to think harder.
+    const effort = process.env["MOCHI_CLAUDE_EFFORT"] ?? "low";
+    const args = [
+      "--print",
+      "--model",
+      model,
+      "--effort",
+      effort,
+      "--output-format",
+      "stream-json",
+      "--include-partial-messages",
+      "--permission-mode",
+      "bypassPermissions",
+      "--verbose",
+      // Token-efficiency: the agent only needs to read existing files
+      // and write index.tsx + manifest.json. `--tools` restricts the
+      // built-in set, but it does NOT prevent MCP-served tools or
+      // plugin-injected tools from showing up — those slip in via the
+      // user's settings.json (Figma/Gmail/Calendar/Drive/Playwright/
+      // gopls/rust-analyzer plugins, etc.). The combined flags below
+      // strip the agent's tool list down to just Read/Write/Edit:
+      //   --tools                 — narrow the built-ins
+      //   --strict-mcp-config +   — ignore every MCP source other
+      //   --mcp-config '{}'         than this empty one
+      //   --disable-slash-commands — skip skills (no /skill resolution)
+      //   --setting-sources ""    — don't load user/project/local
+      //                             plugins or agent definitions
+      "--tools",
+      "Write,Edit,Read",
+      "--strict-mcp-config",
+      "--mcp-config",
+      '{"mcpServers":{}}',
+      "--disable-slash-commands",
+      "--setting-sources",
+      "",
+      // Move per-machine sections (cwd/env/git status) out of the cached
+      // system prompt so the static prefix is reused across builds.
+      "--exclude-dynamic-system-prompt-sections",
+    ];
+    if (resume) {
+      args.push("--resume", sessionId);
+    } else {
+      args.push("--session-id", sessionId);
+      args.push("--append-system-prompt", SYSTEM_PROMPT);
+    }
+    args.push(prompt);
+
+    const command = Command.make("claude", ...args).pipe(
+      Command.workingDirectory(cwd),
+    );
+
+    // Start the process inside its own scope so .stdout / .stderr / .kill
+    // are all wired to the same lifetime owned by the caller.
+    const child = yield* executor.start(command).pipe(
+      Effect.mapError(
+        (cause) =>
+          new ClaudeError({
+            message: "failed to start `claude` subprocess",
+            cause,
+          }),
+      ),
+    );
+
+    // Capture stderr into a ref so we can include it in error reports.
+    const stderrRef = yield* Ref.make("");
+    yield* Stream.runForEach(child.stderr, (chunk) =>
+      Ref.update(stderrRef, (s) => s + new TextDecoder().decode(chunk)),
+    ).pipe(
+      Effect.catchAll(() => Effect.void),
+      Effect.forkScoped,
+    );
+
+    const events: Stream.Stream<ClaudeStreamEvent, ClaudeError> = child.stdout.pipe(
+      Stream.decodeText("utf8"),
+      Stream.splitLines,
+      Stream.filter((line) => line.trim().length > 0),
+      Stream.mapEffect((line) =>
+        Effect.try({
+          try: () => JSON.parse(line) as unknown,
+          catch: (cause) =>
+            new ClaudeError({
+              message: `non-JSON line on claude stdout: ${line.slice(0, 120)}`,
+              cause,
+            }),
+        }).pipe(
+          Effect.flatMap((u) =>
+            decodeEvent(u).pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ClaudeError({
+                    message: "claude stdout event failed schema",
+                    cause,
+                  }),
+              ),
+            ),
+          ),
+        ),
+      ),
+      Stream.mapError((e) =>
+        e instanceof ClaudeError ? e : new ClaudeError({ message: String(e) }),
+      ),
+      // After stdout closes, check exit code and fail if non-zero.
+      Stream.concat(
+        Stream.unwrap(
+          Effect.gen(function* () {
+            const code = yield* child.exitCode.pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ClaudeError({
+                    message: "could not read claude exit code",
+                    cause,
+                  }),
+              ),
+            );
+            if (code === 0) return Stream.empty as Stream.Stream<ClaudeStreamEvent, ClaudeError>;
+            const stderr = yield* Ref.get(stderrRef);
+            return Stream.fail(
+              new ClaudeError({
+                message: `claude exited with code ${code}`,
+                stderr: stderr.slice(-2000),
+              }),
+            ) as Stream.Stream<ClaudeStreamEvent, ClaudeError>;
+          }),
+        ),
+      ),
+    );
+
+    return events;
+  });
+}
