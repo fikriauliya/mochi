@@ -1,6 +1,12 @@
 import * as React from "react";
 import { KidShell } from "./components/KidShell";
-import { createApp, getApp, listApps, modifyApp } from "./lib/api";
+import {
+  createApp,
+  getApp,
+  listApps,
+  listSuggestions,
+  modifyApp,
+} from "./lib/api";
 import type { App, AppKind } from "./lib/types";
 import "./index.css";
 
@@ -28,6 +34,7 @@ export function App() {
     viewFromPath(window.location.pathname),
   );
   const [apps, setApps] = React.useState<App[]>([]);
+  const [suggestions, setSuggestions] = React.useState<string[]>([]);
 
   React.useEffect(() => {
     const onPop = () => setView(viewFromPath(window.location.pathname));
@@ -49,6 +56,15 @@ export function App() {
       setApps(next);
     } catch {
       /* ignore */
+    }
+    // Suggestions are server-cached on the same app-id set, so this is
+    // cheap when nothing changed and re-pulls when a build added/removed
+    // an app.
+    try {
+      const next = await listSuggestions();
+      if (next.length > 0) setSuggestions(next);
+    } catch {
+      /* ignore — KidShell falls back to hardcoded ideas */
     }
   }, []);
 
@@ -160,6 +176,7 @@ export function App() {
   return (
     <KidShell
       apps={apps}
+      suggestions={suggestions}
       view={view}
       currentApp={currentApp}
       onCreate={onCreate}

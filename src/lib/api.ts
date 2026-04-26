@@ -26,6 +26,11 @@ async function asJson<T>(res: Response): Promise<T> {
 export const listApps = (): Promise<App[]> =>
   fetch("/api/apps").then((r) => asJson<App[]>(r));
 
+export const listSuggestions = (): Promise<string[]> =>
+  fetch("/api/suggestions")
+    .then((r) => asJson<{ suggestions: string[] }>(r))
+    .then((d) => d.suggestions);
+
 export const getApp = (id: string): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}`).then((r) => asJson<App>(r));
 

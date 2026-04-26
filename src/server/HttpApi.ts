@@ -8,6 +8,7 @@ import { OrganizeService } from "./Organize";
 import { PrintableService } from "./Printable";
 import { RegistryService } from "./Registry";
 import { type App, CreateAppRequest, PatchAppRequest } from "./Schema";
+import { SuggestService } from "./Suggest";
 import { VoiceService } from "./Voice";
 
 /** Services consumed by the HTTP route handlers. */
@@ -18,6 +19,7 @@ export type MochiServices =
   | BuildService
   | PrintableService
   | OrganizeService
+  | SuggestService
   | VoiceService
   | Path.Path;
 
@@ -58,6 +60,22 @@ self.addEventListener("fetch", () => {});
 
 const decodeCreate = S.decodeUnknown(CreateAppRequest);
 const decodePatch = S.decodeUnknown(PatchAppRequest);
+
+/**
+ * Suggestions cache — keyed on the sorted app-id set so we re-invoke
+ * sonnet only when the registry changes (add / delete). Renames don't
+ * invalidate; the suggestions still feel fresh because they're scoped
+ * to the user's *kinds* of apps, not specific titles. In-memory only;
+ * a server restart regenerates on first request.
+ */
+let suggestCache: { key: string; suggestions: ReadonlyArray<string> } | null =
+  null;
+
+const appsKey = (apps: ReadonlyArray<App>): string =>
+  apps
+    .map((a) => a.id)
+    .sort()
+    .join(",");
 
 function shortHex(n = 4): string {
   return [...crypto.getRandomValues(new Uint8Array(n))]
@@ -280,6 +298,34 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
         ? url.pathname.slice(prefix.length)
         : "index.html";
       return serveAppFile(req.params.id, rest || "index.html");
+    },
+
+    // ---- SUGGESTIONS: cached sonnet ideas based on the registry ----
+    "/api/suggestions": {
+      GET: () =>
+        runP(
+          handle(
+            Effect.gen(function* () {
+              const reg = yield* RegistryService;
+              const apps = yield* reg.list;
+              const key = appsKey(apps);
+              if (suggestCache && suggestCache.key === key) {
+                return okJson({ suggestions: suggestCache.suggestions });
+              }
+              const suggester = yield* SuggestService;
+              const suggestions = yield* suggester.suggest(
+                apps.map((a) => ({
+                  name: a.name,
+                  emoji: a.emoji,
+                  description: a.description,
+                  kind: a.kind,
+                })),
+              );
+              suggestCache = { key, suggestions };
+              return okJson({ suggestions });
+            }),
+          ),
+        ),
     },
 
     // ---- VOICE: ElevenLabs proxy (key stays server-side) ----

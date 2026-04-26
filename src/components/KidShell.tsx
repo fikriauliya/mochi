@@ -46,7 +46,7 @@ type View =
   | { kind: "build"; appId: string }
   | { kind: "open"; appId: string };
 
-const SUGGESTIONS = [
+const FALLBACK_SUGGESTIONS = [
   "a flashcard quiz about animals",
   "a tap-the-color game",
   "a checklist for the morning",
@@ -56,6 +56,8 @@ const SUGGESTIONS = [
 
 type ShellProps = {
   apps: App[];
+  /** Live ideas from /api/suggestions; falls back to a static list. */
+  suggestions: string[];
   view: View;
   currentApp: App | null;
   onCreate: (prompt: string, kind?: AppKind) => void;
@@ -69,6 +71,7 @@ type ShellProps = {
 export function KidShell(props: ShellProps) {
   const {
     apps,
+    suggestions,
     view,
     currentApp,
     onCreate,
@@ -95,6 +98,9 @@ export function KidShell(props: ShellProps) {
   return (
     <KidHome
       apps={apps}
+      suggestions={
+        suggestions.length > 0 ? suggestions : FALLBACK_SUGGESTIONS
+      }
       onOpenApp={onOpenApp}
       onCreate={onCreate}
       onModify={onModify}
@@ -136,12 +142,13 @@ function LangChip({
 
 function KidHome(props: {
   apps: App[];
+  suggestions: ReadonlyArray<string>;
   onOpenApp: (id: string) => void;
   onCreate: (prompt: string, kind?: AppKind) => void;
   onModify: (id: string, prompt: string) => void;
   onReload: () => void;
 }) {
-  const { apps, onOpenApp, onCreate, onModify, onReload } = props;
+  const { apps, suggestions, onOpenApp, onCreate, onModify, onReload } = props;
   const [lang, setLang] = useSpeechLang();
   type Composer =
     | { kind: "idle" }
@@ -195,7 +202,29 @@ function KidHome(props: {
             onPrintable={() => openVoice("printable")}
             onType={openType}
           />
-          <div className="flex-1 overflow-y-auto px-4 pt-4 pb-6 sm:pb-8">
+          <div className="flex-1 overflow-y-auto px-4 pt-3 pb-6 sm:pb-8">
+            {suggestions.length > 0 && (
+              <div className="max-w-7xl mx-auto mb-4 flex flex-wrap items-center gap-1.5 2xl:gap-2">
+                <span className="text-[0.7rem] 2xl:text-[0.85rem] uppercase tracking-[0.18em] text-ink-faint mr-1">
+                  try
+                </span>
+                {suggestions.map((s) => (
+                  <button
+                    key={s}
+                    onClick={() => onCreate(s)}
+                    className="
+                      px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full italic
+                      text-[0.78rem] 2xl:text-base
+                      bg-paper border border-line/70 text-ink-soft
+                      hover:bg-cream-deep transition-colors
+                      focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+                    "
+                  >
+                    {s}
+                  </button>
+                ))}
+              </div>
+            )}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 2xl:gap-4 max-w-7xl mx-auto">
               {sorted.map((app) => (
                 <KidAppTile
@@ -242,7 +271,7 @@ function KidHome(props: {
               <span className="text-[0.7rem] 2xl:text-[0.85rem] uppercase tracking-[0.18em] text-ink-faint mr-1">
                 try
               </span>
-              {SUGGESTIONS.map((s) => (
+              {suggestions.map((s) => (
                 <button
                   key={s}
                   onClick={() => onCreate(s)}
