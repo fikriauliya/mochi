@@ -19,6 +19,7 @@ const provideRegistry = <A, E>(eff: Effect.Effect<A, E, RegistryService>) =>
 const sample = (over: Partial<App> = {}): App => ({
   id: "test-1",
   sessionId: "sess-uuid",
+  kind: "app",
   name: "Test",
   emoji: "🧪",
   description: "test app",

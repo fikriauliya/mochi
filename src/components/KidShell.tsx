@@ -5,6 +5,7 @@ import {
   X,
   ExternalLink,
   Pencil,
+  Printer,
   RefreshCcw,
   Trash2,
   ChevronRight,
@@ -23,7 +24,7 @@ import {
 } from "@/lib/speech";
 import { speak, cancelSpeech } from "@/lib/tts";
 import { deleteApp, subscribeStream } from "@/lib/api";
-import type { App, BuildEvent } from "@/lib/types";
+import type { App, AppKind, BuildEvent } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 /**
@@ -56,7 +57,7 @@ type ShellProps = {
   apps: App[];
   view: View;
   currentApp: App | null;
-  onCreate: (prompt: string) => void;
+  onCreate: (prompt: string, kind?: AppKind) => void;
   onModify: (id: string, prompt: string) => void;
   onOpenApp: (id: string) => void;
   onBack: () => void;
@@ -135,7 +136,7 @@ function LangChip({
 function KidHome(props: {
   apps: App[];
   onOpenApp: (id: string) => void;
-  onCreate: (prompt: string) => void;
+  onCreate: (prompt: string, kind?: AppKind) => void;
   onModify: (id: string, prompt: string) => void;
   onReload: () => void;
 }) {
@@ -143,8 +144,19 @@ function KidHome(props: {
   const [lang, setLang] = useSpeechLang();
   type Composer =
     | { kind: "idle" }
-    | { kind: "voice"; intent: "create" | "modify"; app?: App }
-    | { kind: "text"; intent: "create" | "modify"; app?: App; seed?: string };
+    | {
+        kind: "voice";
+        intent: "create" | "modify";
+        app?: App;
+        outputKind?: AppKind;
+      }
+    | {
+        kind: "text";
+        intent: "create" | "modify";
+        app?: App;
+        seed?: string;
+        outputKind?: AppKind;
+      };
   const [composer, setComposer] = React.useState<Composer>({ kind: "idle" });
   const [menuApp, setMenuApp] = React.useState<App | null>(null);
 
@@ -211,18 +223,43 @@ function KidHome(props: {
             ))}
           </div>
 
-          {/* Type-instead fallback for adults / when voice isn't an option */}
-          <button
-            onClick={() => setComposer({ kind: "text", intent: "create" })}
-            className="
-              inline-flex items-center gap-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full
-              text-[0.78rem] 2xl:text-base text-ink-soft hover:text-ink hover:bg-cream-deep
-              transition-colors
-              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-            "
-          >
-            <Keyboard className="size-3.5 2xl:size-4" /> or type instead
-          </button>
+          {/* Secondary mode: a printable infographic instead of an app.
+              Same voice/text overlays, just plumbs `outputKind: "printable"`
+              through to onCreate so the server takes the gpt-image-2 path. */}
+          <div className="flex flex-wrap items-center justify-center gap-2 2xl:gap-3">
+            <button
+              onClick={() =>
+                setComposer({
+                  kind: "voice",
+                  intent: "create",
+                  outputKind: "printable",
+                })
+              }
+              className="
+                inline-flex items-center gap-1.5 px-4 py-2 2xl:px-5 2xl:py-3 rounded-full
+                bg-paper border-2 border-mochi-deep/40 text-mochi-deep font-bold
+                text-[0.85rem] 2xl:text-base
+                hover:bg-mochi-soft hover:border-mochi-deep transition-colors
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+              "
+              title="Generate a printable infographic with gpt-image-2"
+            >
+              <Printer className="size-4 2xl:size-5" /> Make a printable
+            </button>
+
+            {/* Type-instead fallback for adults / when voice isn't an option */}
+            <button
+              onClick={() => setComposer({ kind: "text", intent: "create" })}
+              className="
+                inline-flex items-center gap-1.5 px-3 py-1.5 2xl:px-4 2xl:py-2.5 rounded-full
+                text-[0.78rem] 2xl:text-base text-ink-soft hover:text-ink hover:bg-cream-deep
+                transition-colors
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+              "
+            >
+              <Keyboard className="size-3.5 2xl:size-4" /> or type instead
+            </button>
+          </div>
         </div>
 
         <div className="px-4 pb-6 sm:pb-8">
@@ -253,6 +290,7 @@ function KidHome(props: {
         <KidMicOverlay
           lang={lang}
           intent={composer.intent}
+          outputKind={composer.outputKind ?? "app"}
           onClose={() => setComposer({ kind: "idle" })}
           onSwitchToType={(seed) => {
             const c = composer;
@@ -260,13 +298,14 @@ function KidHome(props: {
               kind: "text",
               intent: c.intent,
               ...(c.app !== undefined ? { app: c.app } : {}),
+              ...(c.outputKind !== undefined ? { outputKind: c.outputKind } : {}),
               ...(seed !== undefined ? { seed } : {}),
             });
           }}
           onPrompt={(prompt) => {
             const c = composer;
             setComposer({ kind: "idle" });
-            if (c.intent === "create") onCreate(prompt);
+            if (c.intent === "create") onCreate(prompt, c.outputKind ?? "app");
             else if (c.app) onModify(c.app.id, prompt);
           }}
         />
@@ -277,11 +316,12 @@ function KidHome(props: {
           intent={composer.intent}
           target={composer.app}
           initial={composer.seed ?? ""}
+          outputKind={composer.outputKind ?? "app"}
           onClose={() => setComposer({ kind: "idle" })}
           onSubmit={(prompt) => {
             const c = composer;
             setComposer({ kind: "idle" });
-            if (c.intent === "create") onCreate(prompt);
+            if (c.intent === "create") onCreate(prompt, c.outputKind ?? "app");
             else if (c.app) onModify(c.app.id, prompt);
           }}
         />
@@ -573,12 +613,14 @@ function KidAppMenu(props: {
 function KidMicOverlay({
   lang,
   intent,
+  outputKind = "app",
   onClose,
   onPrompt,
   onSwitchToType,
 }: {
   lang: SpeechLang;
   intent: "create" | "modify";
+  outputKind?: AppKind;
   onClose: () => void;
   onPrompt: (text: string) => void;
   onSwitchToType: (seed?: string) => void;
@@ -617,21 +659,28 @@ function KidMicOverlay({
   const display =
     phase === "listening"
       ? [accumulated, live].filter(Boolean).join(" ").trim() ||
-        (intent === "create" ? "I'm listening…" : "What should change?")
+        (intent === "create"
+          ? outputKind === "printable"
+            ? "What should I make to print?"
+            : "I'm listening…"
+          : "What should change?")
       : accumulated;
 
   const confirm = () => {
     if (!accumulated.trim()) return;
-    speak(
+    const utterance =
       intent === "create"
-        ? lang === "id-ID"
-          ? "Sebentar ya, Mochi lagi bikin!"
-          : "Hold on, Mochi is making it!"
+        ? outputKind === "printable"
+          ? lang === "id-ID"
+            ? "Sebentar ya, Mochi lagi gambar!"
+            : "Hold on, Mochi is sketching!"
+          : lang === "id-ID"
+            ? "Sebentar ya, Mochi lagi bikin!"
+            : "Hold on, Mochi is making it!"
         : lang === "id-ID"
           ? "Oke, Mochi update ya!"
-          : "Okay, updating it!",
-      lang,
-    );
+          : "Okay, updating it!";
+    speak(utterance, lang);
     onPrompt(accumulated.trim());
   };
 
@@ -684,8 +733,16 @@ function KidMicOverlay({
               focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
             "
           >
-            <Sparkles className="size-5 2xl:size-6" />
-            {intent === "create" ? "Build it!" : "Update it!"}
+            {outputKind === "printable" ? (
+              <Printer className="size-5 2xl:size-6" />
+            ) : (
+              <Sparkles className="size-5 2xl:size-6" />
+            )}
+            {intent === "create"
+              ? outputKind === "printable"
+                ? "Make it!"
+                : "Build it!"
+              : "Update it!"}
           </button>
 
           <div className="flex flex-wrap items-center justify-center gap-3 w-full">
@@ -757,12 +814,14 @@ function KidTypeOverlay({
   intent,
   target,
   initial,
+  outputKind = "app",
   onClose,
   onSubmit,
 }: {
   intent: "create" | "modify";
   target?: App;
   initial: string;
+  outputKind?: AppKind;
   onClose: () => void;
   onSubmit: (text: string) => void;
 }) {
@@ -789,12 +848,16 @@ function KidTypeOverlay({
 
   const title =
     intent === "create"
-      ? "What should Mochi build?"
+      ? outputKind === "printable"
+        ? "What should Mochi print?"
+        : "What should Mochi build?"
       : `Change ${target?.name ?? "the app"}`;
 
   const placeholder =
     intent === "create"
-      ? "e.g. a flashcard quiz about animals"
+      ? outputKind === "printable"
+        ? "e.g. a chore chart with stickers, a multiplication table"
+        : "e.g. a flashcard quiz about animals"
       : `e.g. make the buttons purple, add a high-score`;
 
   return (
@@ -865,8 +928,16 @@ function KidTypeOverlay({
               focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
             "
           >
-            <Sparkles className="size-4" />
-            {intent === "create" ? "Build it" : "Change it"}
+            {outputKind === "printable" ? (
+              <Printer className="size-4" />
+            ) : (
+              <Sparkles className="size-4" />
+            )}
+            {intent === "create"
+              ? outputKind === "printable"
+                ? "Make it"
+                : "Build it"
+              : "Change it"}
           </button>
           <button
             onClick={onClose}
@@ -1077,9 +1148,18 @@ function KidOpenView({
 }) {
   const [iframeKey] = React.useState(0);
   const [lang] = useSpeechLang();
+  const iframeRef = React.useRef<HTMLIFrameElement>(null);
+  const isPrintable = app.kind === "printable";
   const [composer, setComposer] = React.useState<
     { kind: "idle" } | { kind: "voice" } | { kind: "text"; seed?: string }
   >({ kind: "idle" });
+
+  const handlePrint = React.useCallback(() => {
+    // Calling print() on the iframe's contentWindow drives the iframe's
+    // own document — which is exactly the printable PNG with the @page
+    // rules we wrote into apps/<id>/index.html.
+    iframeRef.current?.contentWindow?.print();
+  }, []);
 
   return (
     <div className="h-dvh w-screen flex flex-col bg-white">
@@ -1114,17 +1194,37 @@ function KidOpenView({
           <span className="truncate">{app.name}</span>
         </h2>
 
+        {isPrintable && (
+          <button
+            onClick={handlePrint}
+            aria-label="Print"
+            className="
+              shrink-0 inline-flex items-center justify-center gap-2
+              min-h-11 2xl:min-h-12 px-4 2xl:px-5 rounded-full
+              bg-mochi-deep text-paper font-semibold text-sm 2xl:text-base
+              shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
+              hover:scale-[1.03] active:scale-95 transition-transform
+              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+            "
+          >
+            <Printer className="size-4 2xl:size-5" />
+            <span className="hidden sm:inline">Print</span>
+          </button>
+        )}
+
         <button
           onClick={() => setComposer({ kind: "voice" })}
           aria-label="Modify this app"
-          className="
-            shrink-0 inline-flex items-center justify-center gap-2
-            min-h-11 2xl:min-h-12 px-4 2xl:px-5 rounded-full
-            bg-mochi-deep text-paper font-semibold text-sm 2xl:text-base
-            shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
-            hover:scale-[1.03] active:scale-95 transition-transform
-            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-          "
+          className={cn(
+            "shrink-0 inline-flex items-center justify-center gap-2",
+            "min-h-11 2xl:min-h-12 px-4 2xl:px-5 rounded-full",
+            "font-semibold text-sm 2xl:text-base transition-transform",
+            "hover:scale-[1.03] active:scale-95",
+            "focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft",
+            isPrintable
+              ? "bg-paper border border-line text-ink hover:bg-cream-deep"
+              : "bg-mochi-deep text-paper shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]",
+          )}
         >
           <Pencil className="size-4 2xl:size-5" />
           <span className="hidden sm:inline">Modify</span>
@@ -1147,10 +1247,20 @@ function KidOpenView({
       </div>
 
       <iframe
+        ref={iframeRef}
         key={iframeKey}
         src={`/apps/${app.id}/?t=${iframeKey}`}
         title={app.name}
-        sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
+        sandbox={
+          // Printables need `allow-modals` so window.print() opens the
+          // browser's print dialog. `allow-same-origin` lets the parent
+          // call into contentWindow; `allow-scripts` is included for
+          // browser-compat (some engines gate print() on it even when
+          // invoked from the parent).
+          isPrintable
+            ? "allow-scripts allow-modals allow-same-origin"
+            : "allow-scripts allow-forms allow-popups allow-same-origin"
+        }
         className="flex-1 w-full bg-white"
       />
 

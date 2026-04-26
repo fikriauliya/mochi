@@ -3,10 +3,18 @@ import { Schema as S } from "effect";
 export const AppStatus = S.Literal("building", "ready", "error");
 export type AppStatus = S.Schema.Type<typeof AppStatus>;
 
+/**
+ * Output kind: an interactive web app (claude generates index.tsx)
+ * vs a static printable infographic (gpt-image-2 generates print.png).
+ */
+export const AppKind = S.Literal("app", "printable");
+export type AppKind = S.Schema.Type<typeof AppKind>;
+
 /** The on-disk shape of one app entry in apps/registry.json. */
 export const App = S.Struct({
   id: S.String,
   sessionId: S.String,
+  kind: AppKind,
   name: S.String,
   emoji: S.String,
   description: S.String,
@@ -18,9 +26,13 @@ export const App = S.Struct({
 });
 export type App = S.Schema.Type<typeof App>;
 
-/** Body of POST /api/apps and POST /api/apps/:id/modify. */
+/**
+ * Body of POST /api/apps. `kind` is optional; legacy clients posting just
+ * `{ prompt }` continue to get an interactive app.
+ */
 export const CreateAppRequest = S.Struct({
   prompt: S.String.pipe(S.minLength(1), S.maxLength(2000)),
+  kind: S.optional(AppKind),
 });
 export type CreateAppRequest = S.Schema.Type<typeof CreateAppRequest>;
 

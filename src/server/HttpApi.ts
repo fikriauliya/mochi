@@ -4,6 +4,7 @@ import indexHtml from "../index.html";
 import { BuildService } from "./Build";
 import { ClaudeService } from "./Claude";
 import { JobsService } from "./Jobs";
+import { PrintableService } from "./Printable";
 import { RegistryService } from "./Registry";
 import { type App, CreateAppRequest } from "./Schema";
 
@@ -13,6 +14,7 @@ export type MochiServices =
   | JobsService
   | ClaudeService
   | BuildService
+  | PrintableService
   | Path.Path;
 
 const SSE_HEADERS: Record<string, string> = {
@@ -134,14 +136,16 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
                 catch: () => new Error("invalid JSON body"),
               });
               const parsed = yield* decodeCreate(body);
+              const kind = parsed.kind ?? "app";
               const id = newAppId(parsed.prompt);
               const sessionId = newSessionId();
               const now = Date.now();
               const app: App = {
                 id,
                 sessionId,
+                kind,
                 name: parsed.prompt.slice(0, 60),
-                emoji: "🍡",
+                emoji: kind === "printable" ? "🖨" : "🍡",
                 description: parsed.prompt,
                 prompt: parsed.prompt,
                 status: "building",

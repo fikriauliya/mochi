@@ -1,9 +1,11 @@
 export type AppStatus = "building" | "ready" | "error";
+export type AppKind = "app" | "printable";
 
 /** Mirror of src/server/Schema.ts App. */
 export type App = {
   id: string;
   sessionId: string;
+  kind: AppKind;
   name: string;
   emoji: string;
   description: string;

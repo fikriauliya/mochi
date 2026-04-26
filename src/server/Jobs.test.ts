@@ -7,8 +7,23 @@ import { Effect, Exit, Layer, Stream } from "effect";
 import { BuildLive } from "./Build";
 import { ClaudeService, type ClaudeError } from "./Claude";
 import { JobsLive, JobsService, projectClaudeEvent } from "./Jobs";
+import { PrintableError, PrintableService } from "./Printable";
 import { makeRegistryLive, RegistryService } from "./Registry";
 import type { App, ClaudeStreamEvent } from "./Schema";
+
+// Tests never exercise the printable path (no OpenAI calls), but Jobs requires
+// the service to be in scope. This stub fails loudly if accidentally invoked.
+const StubPrintableLive = Layer.succeed(
+  PrintableService,
+  PrintableService.of({
+    generatePng: () =>
+      Effect.fail(
+        new PrintableError({
+          message: "PrintableService is not exercised in this test",
+        }),
+      ),
+  }),
+);
 
 // ---------- Pure projection unit tests ----------
 
@@ -181,6 +196,7 @@ const fakeStreamEvents: ReadonlyArray<ClaudeStreamEvent> = [
 const seedApp = (id: string): App => ({
   id,
   sessionId: crypto.randomUUID(),
+  kind: "app",
   name: id,
   emoji: "🍡",
   description: "",
@@ -200,6 +216,7 @@ const TestServices = (
         makeRegistryLive(dbPath),
         MockClaudeLive(events, sideEffect),
         BuildLive,
+        StubPrintableLive,
       ),
     ),
     Layer.provideMerge(BunContext.layer),
@@ -355,6 +372,7 @@ describe("Jobs (end-to-end with mock claude)", () => {
             }),
           ),
           BuildLive,
+          StubPrintableLive,
         ),
       ),
       Layer.provideMerge(BunContext.layer),

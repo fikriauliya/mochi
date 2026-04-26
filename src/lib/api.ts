@@ -1,4 +1,4 @@
-import type { App, BuildEvent } from "./types";
+import type { App, AppKind, BuildEvent } from "./types";
 
 export class ApiError extends Error {
   constructor(public status: number, message: string) {
@@ -29,7 +29,10 @@ export const listApps = (): Promise<App[]> =>
 export const getApp = (id: string): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}`).then((r) => asJson<App>(r));
 
-export const createApp = (input: { prompt: string }): Promise<App> =>
+export const createApp = (input: {
+  prompt: string;
+  kind?: AppKind;
+}): Promise<App> =>
   fetch("/api/apps", {
     method: "POST",
     headers: { "content-type": "application/json" },

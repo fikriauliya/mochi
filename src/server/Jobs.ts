@@ -14,8 +14,10 @@ import {
 import { BuildService } from "./Build";
 import { ClaudeService, ClaudeError } from "./Claude";
 import { computeCost, formatCost, type Usage } from "./Pricing";
+import { PrintableService } from "./Printable";
 import { AppNotFound, RegistryError, RegistryService } from "./Registry";
 import {
+  type App,
   type BuildEvent,
   type ClaudeStreamEvent,
   Manifest,
@@ -137,12 +139,56 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : s.slice(0, n - 1) + "…";
 }
 
+/**
+ * Static HTML shell used to render a printable PNG. Matches A4 portrait
+ * with zero margin so `window.print()` produces a borderless full-bleed
+ * page. The on-screen view scales the image to fit so it's also fine to
+ * just look at in the iframe before printing.
+ */
+const printableHtmlTemplate = (title: string) => `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>${escapeHtml(title)}</title>
+<style>
+  @page { size: A4 portrait; margin: 0; }
+  html, body { margin: 0; padding: 0; background: #fbf1e1; }
+  body { min-height: 100dvh; display: flex; align-items: center; justify-content: center; padding: 1rem; box-sizing: border-box; }
+  img { max-width: 100%; max-height: calc(100dvh - 2rem); width: auto; height: auto; box-shadow: 0 12px 32px -10px rgba(42,36,33,0.35); border-radius: 8px; background: #fff; }
+  @media print {
+    body { background: #fff; padding: 0; }
+    img { width: 100vw; height: 100vh; max-width: none; max-height: none; object-fit: contain; box-shadow: none; border-radius: 0; }
+  }
+</style>
+</head>
+<body>
+  <img src="./print.png" alt="${escapeHtml(title)}" />
+</body>
+</html>
+`;
+
+function escapeHtml(s: string): string {
+  return s
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/** Pull a short title out of the prompt — first line, max 60 chars. */
+function deriveTitle(prompt: string): string {
+  const firstLine = prompt.split(/\r?\n/)[0]?.trim() ?? prompt;
+  return firstLine.slice(0, 60) || "Printable";
+}
+
 export const JobsLive = Layer.effect(
   JobsService,
   Effect.gen(function* () {
     const claude = yield* ClaudeService;
     const registry = yield* RegistryService;
     const builder = yield* BuildService;
+    const printable = yield* PrintableService;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const jobs = yield* Ref.make<ReadonlyMap<string, ActiveJob>>(new Map());
@@ -160,7 +206,7 @@ export const JobsLive = Layer.effect(
       id: string,
       kind: JobKind,
       prompt: string,
-      sessionId: string,
+      app: App,
       pubsub: PubSub.PubSub<BuildEvent>,
       terminal: Ref.Ref<Option.Option<BuildEvent>>,
     ): Effect.Effect<void, never> =>
@@ -174,8 +220,109 @@ export const JobsLive = Layer.effect(
         yield* fs.makeDirectory(cwd, { recursive: true }).pipe(Effect.ignore);
 
         yield* Effect.log(
-          `[build ${id}] start kind=${kind} promptLen=${prompt.length}`,
+          `[build ${id}] start kind=${kind} outputKind=${app.kind} promptLen=${prompt.length}`,
         );
+
+        // ---- PRINTABLE PATH ----
+        // No claude subprocess; we call OpenAI gpt-image-2 directly, save
+        // the PNG, and synthesize index.html + manifest.json so the rest
+        // of the system (registry status, /apps/:id/* serving, the open
+        // view) treats it identically to a real app.
+        if (app.kind === "printable") {
+          // On modify, accumulate the prompt history so the model can see
+          // both the original subject and the requested change. There's
+          // no `--resume` for image generation, so the alternative would
+          // be regenerating from scratch and losing context.
+          const fullPrompt =
+            kind === "modify" && app.prompt
+              ? `${app.prompt}\n\nNow also: ${prompt}`
+              : prompt;
+
+          yield* publish({
+            type: "status",
+            message:
+              kind === "modify"
+                ? "Mochi is sketching an updated version…"
+                : "Mochi is sketching your printable…",
+          });
+
+          const tImgStart = Date.now();
+          const png = yield* printable.generatePng(fullPrompt);
+          yield* Effect.log(
+            `[build ${id}] gpt-image-2 returned ${png.byteLength} bytes in ${Date.now() - tImgStart}ms`,
+          );
+          yield* publish({
+            type: "status",
+            message: `image ready (${Math.round(png.byteLength / 1024)} KB) — saving…`,
+          });
+
+          yield* fs
+            .writeFile(path.join(cwd, "print.png"), png)
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ClaudeError({
+                    message: "failed to write print.png",
+                    cause,
+                  }),
+              ),
+            );
+
+          const title = deriveTitle(fullPrompt);
+          yield* fs
+            .writeFileString(
+              path.join(cwd, "index.html"),
+              printableHtmlTemplate(title),
+            )
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ClaudeError({
+                    message: "failed to write index.html",
+                    cause,
+                  }),
+              ),
+            );
+
+          const manifest = {
+            name: title,
+            emoji: "🖨",
+            description: fullPrompt.slice(0, 280),
+          };
+          yield* fs
+            .writeFileString(
+              path.join(cwd, "manifest.json"),
+              JSON.stringify(manifest, null, 2),
+            )
+            .pipe(
+              Effect.mapError(
+                (cause) =>
+                  new ClaudeError({
+                    message: "failed to write manifest.json",
+                    cause,
+                  }),
+              ),
+            );
+
+          yield* registry.patch(id, {
+            name: manifest.name,
+            emoji: manifest.emoji,
+            description: manifest.description,
+            prompt: fullPrompt,
+            status: "ready",
+            lastError: undefined,
+          });
+
+          const total = elapsed();
+          yield* Effect.log(`[build ${id}] DONE total=${total}ms (printable)`);
+          const done: BuildEvent = stamp({ type: "done" });
+          yield* Ref.set(terminal, Option.some(done));
+          yield* pubsub.publish(done);
+          return;
+        }
+
+        // ---- APP PATH (existing claude flow) ----
+        const sessionId = app.sessionId;
 
         // Open Claude stream
         const tSpawnStart = Date.now();
@@ -390,7 +537,7 @@ export const JobsLive = Layer.effect(
             .pipe(Effect.ignore);
 
           const fiber = yield* Effect.forkDaemon(
-            runJob(id, kind, prompt, app.sessionId, pubsub, terminal),
+            runJob(id, kind, prompt, app, pubsub, terminal),
           );
           yield* setJob(id, { pubsub, fiber, terminal });
         }),

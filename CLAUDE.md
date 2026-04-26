@@ -4,7 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Mochi is
 
-Mochi is a **family agentic app studio**, not a chatbot. A family member describes an app they want (by voice or text); a real `claude -p` subprocess generates a self-contained React + TypeScript web app inside `apps/<id>/`; the family library lists every app for anyone to open or evolve. "Modify" reuses the same Claude session via `claude --resume <session-id>`, so each follow-up edit threads through the prior conversation.
+Mochi is a **family agentic app studio**, not a chatbot. A family member describes what they want (by voice or text); the host generates one of two output kinds inside `apps/<id>/`:
+
+- **`kind: "app"`** — a real `claude -p` subprocess writes a self-contained React + TypeScript app, then `Bun.build` bundles it. Modify reuses the same Claude session via `claude --resume <session-id>`, so each follow-up edit threads through the prior conversation.
+- **`kind: "printable"`** — OpenAI's `gpt-image-2` (low quality) generates a portrait infographic PNG; the host saves `print.png` and a tiny static `index.html` that displays it with `@page { size: A4; margin: 0 }` so `window.print()` produces a borderless A4 page. Modify regenerates from the accumulated prompt history (no `--resume` for image generation).
+
+Both kinds share the same registry, library, build/SSE pipeline, and open view; the differentiation is internal. Voice/text composer pre-selects the kind via the home button you tapped (🎙 *Tap & talk* → app, 🖨 *Make a printable* → printable).
 
 There is one UI: **kid mode**. It's voice-first (Web Speech API + SpeechSynthesis), with text input as a fallback for adults and a TV remote / D-pad–friendly focus model. Default UI copy is English; STT + TTS default to Indonesian (`id-ID`) and toggle via a `🎙 ID/EN` chip in the corner.
 
@@ -77,6 +82,7 @@ Everything in `src/server/` is built on Effect-TS (`effect`, `@effect/platform`,
 - **`Build.ts`** — `BuildService.bundle(cwd, title)` runs `Bun.build` on `apps/<id>/index.tsx` after Claude finishes successfully, producing `bundle.js` + a server-templated `index.html` that mounts it. Bundle is minified + browser ESM.
 - **`Jobs.ts`** — orchestrator. `Jobs.start(id, kind, prompt)` forks a daemon fiber that consumes the Claude stream, projects each raw event into a leaner `BuildEvent`, fans them out via a per-app `PubSub<BuildEvent>`, then on stream-success reads `manifest.json`, runs `Build.bundle`, and updates the registry. `Jobs.subscribe(id)` returns a `Stream<BuildEvent>` for SSE consumers (multiple browser tabs can watch the same build); a late subscriber gets a one-shot terminal `done`/`error` from the registry so EventSource doesn't spuriously reconnect. Also tracks the active model from the `system/init` event and emits a `cost $… · in=… +cache_r out=…` status line on each `result` event using `Pricing.computeCost`.
 - **`Pricing.ts`** — pure-data table of per-million-token rates for every supported Claude model, plus `lookupRates` (handles trailing `-YYYYMMDD` date suffixes and a family/version fallback for unknown variants), `computeCost`, and `formatCost`. No Effect dependencies; called directly from `Jobs.ts`.
+- **`Printable.ts`** — `PrintableService.generatePng(prompt)` calls OpenAI's `POST /v1/images/generations` (model `gpt-image-2`, `quality: "low"`, `size: "1024x1536"`, `output_format: "png"`) and decodes the returned `b64_json` to a `Uint8Array`. Auth via `OPENAI_API_KEY` (Bun auto-loads `.env`). Wraps the user's prompt with infographic-style framing (portrait, A4, kid-friendly, English text, ink-economical). `Jobs.ts` calls this when `app.kind === "printable"` and skips the claude/bundler path entirely.
 - **`Sse.ts`** — formats a `Stream<BuildEvent>` into `event: <type>\ndata: <json>\n\n` chunks for the SSE endpoint.
 - **`HttpApi.ts`** — Bun.serve route table closed over the runtime. Every handler is an Effect; errors are funnelled through `handle()` → typed status codes. SSE responses are an `Effect.Stream<BuildEvent>` formatted as event-stream chunks via `Stream.toReadableStreamRuntime(stream, runtime)`. Also serves the PWA artifacts (`/manifest.webmanifest`, `/sw.js`, `/icons/:file`).
 - **`Main.ts`** — composes `RegistryLive`, `ClaudeLive`, `BuildLive` as siblings, then `JobsLive` consumes them, all resolved against `BunContext.layer` (FileSystem, Path, CommandExecutor). `runServer` reaches `Effect.runtime` for the runtime, hands it to `makeRoutes`, calls `Bun.serve`, and `Effect.never`s. `BunRuntime.runMain` in `src/index.ts` owns the lifecycle.
@@ -99,7 +105,7 @@ The HTTP routes:
 | GET    | `/icons/:file`             | served from `src/icons/` (PWA + apple-touch-icon)              |
 | GET    | `/*`                       | SPA fallback — Bun HTML import                                 |
 
-### The agent's file contract
+### The agent's file contract (kind = "app")
 
 The `SYSTEM_PROMPT` in `src/server/Claude.ts` constrains generated apps. The agent writes exactly two files in its cwd (`apps/<id>/`):
 
@@ -107,6 +113,18 @@ The `SYSTEM_PROMPT` in `src/server/Claude.ts` constrains generated apps. The age
 2. **`manifest.json`** — `{ name, emoji, description }` validated against the `Manifest` schema.
 
 After Claude exits cleanly, the server reads the manifest, then `Build.ts` runs `Bun.build({ entrypoints: ["index.tsx", "styles.css"], plugins: [tailwindPlugin], minify: true })` — `Build.ts` pre-creates a one-line `styles.css` (`@import "tailwindcss";`) if the agent didn't write one. The output is `bundle.js` + `bundle.css` (the JIT-extracted Tailwind), and `Build.ts` writes a fixed `index.html` shell that loads both. So `/apps/<id>/` is always served by the host: never `claude` directly. Build errors fold into the existing terminal `error` `BuildEvent` with the compile logs.
+
+### Printable contract (kind = "printable")
+
+No agent runs. `Jobs.ts` calls `PrintableService.generatePng(prompt)`, then writes three files into `apps/<id>/`:
+
+1. **`print.png`** — the gpt-image-2 output (1024×1536 PNG).
+2. **`index.html`** — a fixed static shell (no React, no JS) that displays the PNG centered, with `@page { size: A4 portrait; margin: 0 }` and `@media print { img { width: 100vw; height: 100vh; object-fit: contain } }`. The frontend's `KidOpenView` shows a 🖨 Print button that calls `iframeRef.current.contentWindow.print()` to invoke the browser's print dialog.
+3. **`manifest.json`** — synthesized server-side from the prompt: `name = first line truncated to 60 chars`, `emoji = "🖨"`, `description = first 280 chars of the accumulated prompt`.
+
+**Set `OPENAI_API_KEY` in `.env`** — Bun auto-loads it. Without the key, printable builds fail fast with a clear error message; the rest of Mochi is unaffected.
+
+Modify on a printable concatenates the new prompt onto the previous one (`${app.prompt}\n\nNow also: ${newPrompt}`) so the regenerated image evolves rather than starting fresh; the combined prompt is persisted back to `app.prompt` for the next round.
 
 ### Frontend (`src/`)
 

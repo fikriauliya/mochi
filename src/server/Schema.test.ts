@@ -26,6 +26,7 @@ describe("App", () => {
   const valid = {
     id: "x-1234",
     sessionId: "session-uuid",
+    kind: "app",
     name: "X",
     emoji: "🍡",
     description: "hi",

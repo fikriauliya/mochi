@@ -1,7 +1,7 @@
 import * as React from "react";
 import { KidShell } from "./components/KidShell";
 import { createApp, getApp, listApps, modifyApp } from "./lib/api";
-import type { App } from "./lib/types";
+import type { App, AppKind } from "./lib/types";
 import "./index.css";
 
 type View =
@@ -89,9 +89,9 @@ export function App() {
   // ---- Actions ----
 
   const onCreate = React.useCallback(
-    async (prompt: string) => {
+    async (prompt: string, outputKind: AppKind = "app") => {
       try {
-        const app = await createApp({ prompt });
+        const app = await createApp({ prompt, kind: outputKind });
         setApps((cur) => [app, ...cur.filter((a) => a.id !== app.id)]);
         navigate({ kind: "build", appId: app.id });
       } catch (e) {
