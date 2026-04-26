@@ -37,6 +37,16 @@ export class VoiceService extends Context.Tag("VoiceService")<
     ) => Effect.Effect<Uint8Array, VoiceError>;
 
     /**
+     * Stream `text` as MP3 chunks. Returns the upstream Response so
+     * the route handler can pipe `response.body` through to the
+     * browser without buffering — first byte to ear in ~200 ms instead
+     * of waiting for the full ~2 s generation.
+     */
+    readonly synthesizeStream: (
+      text: string,
+    ) => Effect.Effect<Response, VoiceError>;
+
+    /**
      * Mint a 15-min single-use token the browser can use to open the
      * realtime Scribe WebSocket directly. Keeps the API key off the
      * client.
@@ -48,6 +58,8 @@ export class VoiceService extends Context.Tag("VoiceService")<
 const STT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const TTS_URL = (voiceId: string) =>
   `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+const TTS_STREAM_URL = (voiceId: string) =>
+  `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`;
 const TOKEN_URL = (kind: string) =>
   `https://api.elevenlabs.io/v1/single-use-token/${encodeURIComponent(kind)}`;
 
@@ -189,6 +201,47 @@ export const VoiceLive = Layer.succeed(
           `[tts] ${text.length} chars → ${bytes.byteLength}B mp3 in ${Date.now() - t0}ms`,
         );
         return bytes;
+      }),
+
+    synthesizeStream: (text) =>
+      Effect.gen(function* () {
+        const key = apiKey();
+        if (!key) {
+          return yield* Effect.fail(
+            new VoiceError({
+              message: "ELEVENLABS_API_KEY is not set in .env",
+            }),
+          );
+        }
+        const voiceId = process.env["MOCHI_TTS_VOICE_ID"] ?? DEFAULT_VOICE_ID;
+        const modelId = process.env["MOCHI_TTS_MODEL"] ?? DEFAULT_TTS_MODEL;
+
+        const t0 = Date.now();
+        const res = yield* Effect.tryPromise({
+          try: () =>
+            fetch(TTS_STREAM_URL(voiceId), {
+              method: "POST",
+              headers: {
+                "xi-api-key": key,
+                "content-type": "application/json",
+                accept: "audio/mpeg",
+              },
+              body: JSON.stringify({ text, model_id: modelId }),
+            }),
+          catch: (cause) =>
+            new VoiceError({ message: "TTS stream network error", cause }),
+        });
+
+        if (!res.ok) {
+          const body = yield* Effect.promise(() => readErrorBody(res));
+          return yield* Effect.fail(
+            new VoiceError({ message: `TTS ${res.status}: ${body}` }),
+          );
+        }
+        yield* Effect.log(
+          `[tts-stream] ${text.length} chars headers in ${Date.now() - t0}ms`,
+        );
+        return res;
       }),
 
     mintRealtimeToken: () =>

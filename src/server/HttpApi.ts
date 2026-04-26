@@ -407,8 +407,11 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
               if (text.length > 1000)
                 return errorJson(400, "text too long (max 1000 chars)");
               const voice = yield* VoiceService;
-              const audio = yield* voice.synthesize(text);
-              return new Response(audio, {
+              // Stream the upstream body straight through so the browser
+              // can start playing in ~200ms instead of buffering the full
+              // ~2s generation.
+              const upstream = yield* voice.synthesizeStream(text);
+              return new Response(upstream.body, {
                 headers: {
                   "content-type": "audio/mpeg",
                   "cache-control": "private, no-store",

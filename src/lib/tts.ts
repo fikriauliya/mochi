@@ -1,21 +1,25 @@
 import type { SpeechLang } from "./speech";
 
 /**
- * ElevenLabs TTS via the Mochi server (`POST /api/voice/tts`). Returns
- * an MP3 the browser plays through a single shared <audio> element so
- * consecutive calls cancel the prior utterance instead of overlapping.
+ * Streaming TTS via ElevenLabs (proxied through `/api/voice/tts`).
  *
- * Falls back silently if anything goes wrong — Mochi shouldn't break
- * because the API key is missing or the network is flaky.
+ * The server pipes ElevenLabs' streaming MP3 response straight through;
+ * the browser feeds it into a `MediaSource` `SourceBuffer` and starts
+ * playback as soon as a couple hundred ms of audio is buffered, rather
+ * than waiting for the full ~2 s generation.
  *
- * `lang` is accepted for API compatibility with the previous Web Speech
- * implementation; ElevenLabs `eleven_turbo_v2_5` is multilingual and
- * detects the language from the text itself.
+ * Falls back silently to a buffered Blob playback if `MediaSource` (or
+ * `audio/mpeg` SourceBuffer support) isn't available — older Safari +
+ * iOS WebView path. Falls back further to a no-op if the fetch fails.
+ *
+ * `lang` is accepted for API-compat with the previous Web Speech path;
+ * `eleven_turbo_v2_5` is multilingual and detects the language from
+ * the text itself.
  */
 
 let audioEl: HTMLAudioElement | null = null;
-let activeUrl: string | null = null;
 let activeAbort: AbortController | null = null;
+let activeUrl: string | null = null;
 
 function ensureAudioEl(): HTMLAudioElement | null {
   if (typeof document === "undefined") return null;
@@ -26,16 +30,25 @@ function ensureAudioEl(): HTMLAudioElement | null {
   return audioEl;
 }
 
-function cleanupActive(): void {
+function clearActive(): void {
   if (activeAbort) {
     activeAbort.abort();
     activeAbort = null;
   }
   if (activeUrl) {
-    URL.revokeObjectURL(activeUrl);
+    try {
+      URL.revokeObjectURL(activeUrl);
+    } catch {
+      /* ignore */
+    }
     activeUrl = null;
   }
 }
+
+const canStream =
+  typeof MediaSource !== "undefined" &&
+  typeof MediaSource.isTypeSupported === "function" &&
+  MediaSource.isTypeSupported("audio/mpeg");
 
 export function speak(text: string, _lang: SpeechLang = "id-ID"): void {
   void _lang; // accepted for compat; turbo_v2_5 is multilingual
@@ -44,7 +57,7 @@ export function speak(text: string, _lang: SpeechLang = "id-ID"): void {
   const el = ensureAudioEl();
   if (!el) return;
 
-  cleanupActive();
+  clearActive();
   try {
     el.pause();
   } catch {
@@ -53,34 +66,143 @@ export function speak(text: string, _lang: SpeechLang = "id-ID"): void {
 
   const ctrl = new AbortController();
   activeAbort = ctrl;
-  fetch("/api/voice/tts", {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ text: trimmed }),
-    signal: ctrl.signal,
-  })
-    .then(async (res) => {
-      if (!res.ok) throw new Error(`TTS ${res.status}`);
-      const blob = await res.blob();
-      // If a newer call has already started, drop this one.
-      if (ctrl.signal.aborted) return;
-      const url = URL.createObjectURL(blob);
-      activeUrl = url;
-      el.src = url;
-      // Some browsers require a user-gesture for playback; failures here
-      // are common on the very first call before any tap, so swallow.
+  void play(el, trimmed, ctrl);
+}
+
+async function play(
+  el: HTMLAudioElement,
+  text: string,
+  ctrl: AbortController,
+): Promise<void> {
+  let res: Response;
+  try {
+    res = await fetch("/api/voice/tts", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: ctrl.signal,
+    });
+  } catch (err) {
+    if (!ctrl.signal.aborted) console.warn("speak fetch failed", err);
+    return;
+  }
+  if (ctrl.signal.aborted) return;
+  if (!res.ok || !res.body) {
+    console.warn(`speak failed: TTS ${res.status}`);
+    return;
+  }
+
+  if (!canStream) {
+    // No MediaSource support — fall back to buffered playback.
+    const blob = await res.blob();
+    if (ctrl.signal.aborted) return;
+    const url = URL.createObjectURL(blob);
+    activeUrl = url;
+    el.src = url;
+    el.play().catch(() => {
+      /* autoplay blocked */
+    });
+    return;
+  }
+
+  const ms = new MediaSource();
+  const url = URL.createObjectURL(ms);
+  activeUrl = url;
+  el.src = url;
+
+  await new Promise<void>((resolve) => {
+    if (ms.readyState === "open") {
+      resolve();
+      return;
+    }
+    ms.addEventListener("sourceopen", () => resolve(), { once: true });
+  });
+  if (ctrl.signal.aborted) return;
+
+  const sb = ms.addSourceBuffer("audio/mpeg");
+  const queue: Uint8Array[] = [];
+  let started = false;
+  let endRequested = false;
+
+  const drain = () => {
+    if (sb.updating || queue.length === 0) return;
+    const chunk = queue.shift();
+    if (!chunk) return;
+    try {
+      sb.appendBuffer(chunk);
+    } catch (err) {
+      console.warn("appendBuffer failed", err);
+    }
+  };
+
+  sb.addEventListener("updateend", () => {
+    drain();
+    // Kick off playback once we have a hair of buffered audio. ~100ms
+    // is enough to hide the next-chunk arrival and feels instant.
+    if (
+      !started &&
+      sb.buffered.length > 0 &&
+      sb.buffered.end(0) > 0.1
+    ) {
+      started = true;
       el.play().catch(() => {
         /* autoplay blocked */
       });
-    })
-    .catch((err) => {
-      if (ctrl.signal.aborted) return;
-      console.warn("speak failed", err);
-    });
+    }
+    if (
+      endRequested &&
+      queue.length === 0 &&
+      !sb.updating &&
+      ms.readyState === "open"
+    ) {
+      try {
+        ms.endOfStream();
+      } catch {
+        /* already ended */
+      }
+    }
+  });
+
+  const reader = res.body.getReader();
+  try {
+    while (true) {
+      if (ctrl.signal.aborted) {
+        try {
+          await reader.cancel();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
+      const { value, done } = await reader.read();
+      if (done) break;
+      queue.push(value);
+      drain();
+    }
+  } catch (err) {
+    if (!ctrl.signal.aborted) console.warn("speak stream read failed", err);
+    return;
+  }
+
+  endRequested = true;
+  // Trigger one more drain so an idle SourceBuffer doesn't sit on the
+  // last chunk forever.
+  drain();
+  if (
+    !sb.updating &&
+    queue.length === 0 &&
+    ms.readyState === "open"
+  ) {
+    try {
+      ms.endOfStream();
+    } catch {
+      /* already ended */
+    }
+  }
 }
 
 export function cancelSpeech(): void {
-  cleanupActive();
+  clearActive();
   if (audioEl) {
     try {
       audioEl.pause();
