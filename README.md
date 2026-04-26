@@ -212,4 +212,4 @@ The HTTP surface:
 
 ## License
 
-Personal project, no license declared yet.
+[MIT](./LICENSE) © 2026 Pahlevi Fikri Auliya.
