@@ -37,11 +37,6 @@ export const listSuggestions = (): Promise<string[]> =>
     .then((r) => asJson<{ suggestions: string[] }>(r))
     .then((d) => d.suggestions);
 
-export const getRealtimeToken = (): Promise<string> =>
-  fetch("/api/voice/token", { method: "POST" })
-    .then((r) => asJson<{ token: string }>(r))
-    .then((d) => d.token);
-
 export const getAgentSignedUrl = (): Promise<string> =>
   fetch("/api/voice/agent-url", { method: "POST" })
     .then((r) => asJson<{ signedUrl: string }>(r))

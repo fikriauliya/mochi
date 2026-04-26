@@ -110,7 +110,6 @@ The HTTP routes:
 | POST   | `/api/apps/:id/modify`     | `Jobs.start(id, "modify", prompt)` (reuses `--resume`)         |
 | DELETE | `/api/apps/:id`            | `Registry.remove`                                              |
 | POST   | `/api/voice/agent-url`     | signed wss:// for the kid-PM Conversational AI agent           |
-| POST   | `/api/voice/token`         | 15-min single-use token for Scribe v2 Realtime STT             |
 | POST   | `/api/voice/transcribe`    | proxy to ElevenLabs STT (used by generated apps)               |
 | POST   | `/api/voice/tts`           | streaming MP3 from ElevenLabs (used by Mochi + generated apps) |
 | GET    | `/apps/:id/*`              | static-serve `apps/<id>/<rest>` (path traversal blocked)       |
@@ -149,7 +148,7 @@ One UI tree, three view kinds matching the URL: `home / build / open`. URL is mu
 - **`components/KidPMOverlay.tsx`** — voice-only requirement gathering. Uses `Conversation.startSession({signedUrl, clientTools, dynamicVariables, overrides})` from `@elevenlabs/client`; the signed URL is fetched from `/api/voice/agent-url`. The agent's `submit_requirements` client tool is implemented here — when it fires, the overlay calls `onPrompt(spec)` and unmounts (cleanup ends the session). Mascot reflects `mode === "speaking" | "listening"`. On error, falls through to the type fallback so the demo never gets stuck.
 - **`components/Mochi.tsx`** — the inline-SVG mascot. Animated breathing/blink idle + `typing` (squish + steam) + `happy` mouth state. Don't rebuild it from scratch.
 - **`components/AgentLog.tsx`** — pretty-prints streamed `BuildEvent`s. Used in `KidBuildView`'s collapsible "Watch Mochi work" panel. Honours a `verbose` prop (persisted to `localStorage`) that surfaces raw `ClaudeStreamEvent` JSON and the `cost …` status line; non-verbose mode hides them.
-- **`lib/speech.ts`** — `useSpeech` hook around `webkitSpeechRecognition`. Has a configurable `silenceMs` (default 800 ms) that hard-stops the recognizer after a pause so short utterances don't wait for the browser's slow built-in end-of-speech detection. Falls back gracefully when the API is missing. `useSpeechLang()` persists `id-ID`/`en-US` in `localStorage`.
+- **`lib/speech.ts`** — just the persisted `useSpeechLang()` (id-ID / en-US in localStorage) and the `SpeechLang` type. STT used to live here as `useSpeech` over Scribe v2 Realtime; both create and modify voice intake now flow through `KidPMOverlay` → `Conversation.startSession` instead, so the hook was removed.
 - **`lib/tts.ts`** — thin `speak(text, lang)` wrapper that cancels any in-flight utterance first.
 - **`lib/api.ts`** — typed `fetch` wrappers for `/api/apps/*`. `subscribeStream(appId, onEvent)` opens an `EventSource` and registers handlers per `BuildEvent.type`.
 - **`styles/globals.css`** — Tailwind v4 `@theme` block defining the cream/paper palette and Fraunces (display) + Nunito (body) typography. The mascot's breathing/squish/steam keyframes live in `src/index.css`.

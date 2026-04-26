@@ -383,21 +383,6 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
         ),
     },
 
-    "/api/voice/token": {
-      // Mint a 15-min single-use token the browser uses to open the
-      // realtime Scribe WebSocket directly. POST so it's not cached.
-      POST: () =>
-        runP(
-          handle(
-            Effect.gen(function* () {
-              const voice = yield* VoiceService;
-              const token = yield* voice.mintRealtimeToken();
-              return okJson({ token });
-            }),
-          ),
-        ),
-    },
-
     "/api/voice/agent-url": {
       // Mint a signed wss:// URL for the kid-PM Conversational AI agent.
       // The agent_id is server-side env so the client can't spin up
