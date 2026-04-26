@@ -31,6 +31,11 @@ export const listSuggestions = (): Promise<string[]> =>
     .then((r) => asJson<{ suggestions: string[] }>(r))
     .then((d) => d.suggestions);
 
+export const getRealtimeToken = (): Promise<string> =>
+  fetch("/api/voice/token", { method: "POST" })
+    .then((r) => asJson<{ token: string }>(r))
+    .then((d) => d.token);
+
 export const getApp = (id: string): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}`).then((r) => asJson<App>(r));
 

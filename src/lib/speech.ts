@@ -1,18 +1,28 @@
 import * as React from "react";
+import {
+  Scribe,
+  RealtimeEvents,
+  CommitStrategy,
+  type RealtimeConnection,
+} from "@elevenlabs/client";
+import { getRealtimeToken } from "./api";
 
 /**
- * MediaRecorder + ElevenLabs `scribe_v1` STT, proxied through the Mochi
- * server (`POST /api/voice/transcribe`). Replaces the old browser Web
- * Speech API path so transcription quality is consistent across iPad
- * Safari, Android WebView, Chrome, etc.
+ * ElevenLabs Scribe v2 Realtime over WebSocket. The browser opens the
+ * WS directly using a single-use token minted by `/api/voice/token`,
+ * so the API key stays on the server. Scribe handles the audio capture
+ * (mic acquisition, 16-bit PCM at 16kHz, base64 framing) and runs VAD
+ * server-side — partial transcripts arrive every ~150ms while the user
+ * speaks; a `committed_transcript` fires when they pause.
  *
- * Trade-off vs the previous webkitSpeechRecognition flow: no live interim
- * transcripts. We capture audio for one utterance, auto-stop when the user
- * pauses (RMS-based VAD on an AnalyserNode), POST the audio, and emit the
- * final text via `onFinal` once the server responds.
+ * Hook signature is preserved so KidShell doesn't change. `silenceMs`
+ * maps to Scribe's `vadSilenceThresholdSecs` (range 0.3–3.0s).
  *
- * The hook signature is preserved so KidShell doesn't change.
+ * On any failure (token mint, mic permission, WS error) the hook lands
+ * in `state: "error"` with an empty transcript — the UI can fall back
+ * to the type-instead path.
  */
+
 export type SpeechLang = "id-ID" | "en-US";
 
 export const SPEECH_LANG_LABELS: Record<SpeechLang, string> = {
@@ -20,22 +30,16 @@ export const SPEECH_LANG_LABELS: Record<SpeechLang, string> = {
   "en-US": "EN",
 };
 
-type RecState = "idle" | "listening" | "transcribing" | "denied" | "error";
+type RecState = "idle" | "connecting" | "listening" | "denied" | "error";
 
 export type UseSpeechOptions = {
   lang: SpeechLang;
-  /** Called once the server returns a transcript. */
+  /** Called once Scribe commits a finalized segment of speech. */
   onFinal?: (text: string) => void;
   /**
-   * Stop recording after this many ms of silence following the most recent
-   * loud frame. The VAD only arms once at least one loud frame has been
-   * detected, so a slow start to speaking doesn't kill the recording.
-   * Set to 0 to disable auto-stop (caller must invoke `stop()`).
-   *
-   * 2000ms tolerates natural mid-thought pauses (kids especially);
-   * shorter values were cutting off short utterances after every
-   * inter-word gap.
-   * @default 2000
+   * VAD silence threshold (Scribe's `vadSilenceThresholdSecs`). The
+   * server commits a segment after this many seconds of silence.
+   * Range: 0.3–3.0. @default 1.5
    */
   silenceMs?: number;
 };
@@ -48,220 +52,131 @@ export type UseSpeechReturn = {
   stop: () => void;
 };
 
-const RMS_THRESHOLD = 0.025; // ≈ -32 dBFS — quiet room is well below this
-
-/** Pick a MediaRecorder mime type that's widely supported. */
-function pickMimeType(): string {
-  if (typeof MediaRecorder === "undefined") return "";
-  const candidates = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-  ];
-  for (const c of candidates) {
-    if (MediaRecorder.isTypeSupported(c)) return c;
-  }
-  return "";
+/** BCP-47 (`id-ID`) → ISO 639-1 (`id`), the format Scribe accepts. */
+function bcp47ToScribe(lang: SpeechLang): string {
+  return lang.split("-")[0] ?? "";
 }
 
+const SUPPORTED =
+  typeof navigator !== "undefined" &&
+  !!navigator.mediaDevices &&
+  typeof WebSocket !== "undefined";
+
 export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
-  const { lang, onFinal, silenceMs = 2000 } = opts;
-  const [supported, setSupported] = React.useState(false);
+  const { lang, onFinal, silenceMs = 1500 } = opts;
   const [state, setState] = React.useState<RecState>("idle");
   const [transcript, setTranscript] = React.useState("");
 
-  // Mutable session state stays in refs so a re-render mid-recording doesn't
-  // restart the MediaRecorder.
-  const sessionRef = React.useRef<{
-    recorder: MediaRecorder;
-    stream: MediaStream;
-    audioCtx: AudioContext;
-    rafId: number | null;
-    chunks: Blob[];
-  } | null>(null);
-  const submitAbortRef = React.useRef<AbortController | null>(null);
+  const connectionRef = React.useRef<RealtimeConnection | null>(null);
   const onFinalRef = React.useRef(onFinal);
-  const silenceMsRef = React.useRef(silenceMs);
   const langRef = React.useRef(lang);
+  const silenceMsRef = React.useRef(silenceMs);
   React.useEffect(() => {
     onFinalRef.current = onFinal;
-    silenceMsRef.current = silenceMs;
     langRef.current = lang;
+    silenceMsRef.current = silenceMs;
   });
 
-  React.useEffect(() => {
-    const ok =
-      typeof navigator !== "undefined" &&
-      !!navigator.mediaDevices &&
-      typeof MediaRecorder !== "undefined" &&
-      pickMimeType() !== "";
-    setSupported(ok);
-  }, []);
-
-  const teardown = React.useCallback(() => {
-    const s = sessionRef.current;
-    if (!s) return;
-    sessionRef.current = null;
-    if (s.rafId !== null) cancelAnimationFrame(s.rafId);
-    try {
-      s.audioCtx.close();
-    } catch {
-      /* ignore */
-    }
-    for (const track of s.stream.getTracks()) {
-      try {
-        track.stop();
-      } catch {
-        /* ignore */
-      }
-    }
-  }, []);
-
-  const submit = React.useCallback(
-    async (audio: Blob) => {
-      submitAbortRef.current?.abort();
-      const ctrl = new AbortController();
-      submitAbortRef.current = ctrl;
-      setState("transcribing");
-      try {
-        const url = `/api/voice/transcribe?lang=${encodeURIComponent(langRef.current)}`;
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "content-type": audio.type || "audio/webm" },
-          body: audio,
-          signal: ctrl.signal,
-        });
-        if (ctrl.signal.aborted) return;
-        if (!res.ok) throw new Error(`server ${res.status}`);
-        const data = (await res.json()) as { text?: string };
-        if (ctrl.signal.aborted) return;
-        const text = (data.text ?? "").trim();
-        setTranscript(text);
-        if (text) onFinalRef.current?.(text);
-        setState("idle");
-      } catch (err) {
-        if (ctrl.signal.aborted) return;
-        console.error("transcribe failed", err);
-        setState("error");
-      } finally {
-        if (submitAbortRef.current === ctrl) submitAbortRef.current = null;
-      }
-    },
-    [],
-  );
-
   const start = React.useCallback(async () => {
-    if (sessionRef.current) return; // already recording
-    const mimeType = pickMimeType();
-    if (!mimeType) {
-      setState("error");
-      return;
-    }
-
-    let stream: MediaStream;
-    try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-    } catch (err) {
-      const name = (err as { name?: string }).name ?? "";
-      setState(name === "NotAllowedError" || name === "SecurityError" ? "denied" : "error");
-      return;
-    }
-
-    const recorder = new MediaRecorder(stream, { mimeType });
-    const audioCtx = new AudioContext();
-    const source = audioCtx.createMediaStreamSource(stream);
-    const analyser = audioCtx.createAnalyser();
-    analyser.fftSize = 1024;
-    source.connect(analyser);
-    const buffer = new Uint8Array(analyser.fftSize);
-    const chunks: Blob[] = [];
-
-    let lastLoudAt = performance.now();
-    let everSpoke = false;
-    let rafId: number | null = null;
-
-    const tick = () => {
-      analyser.getByteTimeDomainData(buffer);
-      let sum = 0;
-      for (let i = 0; i < buffer.length; i += 1) {
-        const v = ((buffer[i] ?? 128) - 128) / 128;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / buffer.length);
-      if (rms > RMS_THRESHOLD) {
-        lastLoudAt = performance.now();
-        everSpoke = true;
-      }
-      const ms = silenceMsRef.current;
-      if (everSpoke && ms > 0 && performance.now() - lastLoudAt > ms) {
-        try {
-          recorder.stop();
-        } catch {
-          /* already stopping */
-        }
-        return;
-      }
-      rafId = requestAnimationFrame(tick);
-      if (sessionRef.current) sessionRef.current.rafId = rafId;
-    };
-
-    recorder.ondataavailable = (e) => {
-      if (e.data && e.data.size > 0) chunks.push(e.data);
-    };
-    recorder.onerror = () => {
-      teardown();
-      setState("error");
-    };
-    recorder.onstop = () => {
-      teardown();
-      const audio = new Blob(chunks, { type: mimeType });
-      // No bytes captured → either the user didn't speak, the mic was
-      // muted by the OS, or the encoder produced nothing. Surface as
-      // "error" so the overlay can show a "didn't catch that" hint
-      // instead of silently flipping back to idle with no transcript.
-      if (audio.size === 0) {
-        setState("error");
-        return;
-      }
-      void submit(audio);
-    };
-
-    sessionRef.current = { recorder, stream, audioCtx, rafId: null, chunks };
+    if (connectionRef.current) return;
+    setState("connecting");
     setTranscript("");
-    setState("listening");
-    recorder.start(100);
-    rafId = requestAnimationFrame(tick);
-    sessionRef.current.rafId = rafId;
-  }, [submit, teardown]);
+
+    let token: string;
+    try {
+      token = await getRealtimeToken();
+    } catch (err) {
+      console.error("voice token mint failed", err);
+      setState("error");
+      return;
+    }
+
+    let conn: RealtimeConnection;
+    try {
+      conn = Scribe.connect({
+        token,
+        modelId: "scribe_v2_realtime",
+        commitStrategy: CommitStrategy.VAD,
+        // Scribe accepts ISO 639-1 (`id`) or 639-3 (`ind`); strip the
+        // BCP-47 region tag and pass the language root.
+        languageCode: bcp47ToScribe(langRef.current),
+        // Clamp to Scribe's allowed range (0.3–3.0s).
+        vadSilenceThresholdSecs: Math.max(
+          0.3,
+          Math.min(3.0, silenceMsRef.current / 1000),
+        ),
+        microphone: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
+    } catch (err) {
+      console.error("Scribe.connect failed", err);
+      setState("error");
+      return;
+    }
+    connectionRef.current = conn;
+
+    conn.on(RealtimeEvents.OPEN, () => {
+      setState("listening");
+    });
+    conn.on(RealtimeEvents.PARTIAL_TRANSCRIPT, (data) => {
+      setTranscript(data.text);
+    });
+    conn.on(RealtimeEvents.COMMITTED_TRANSCRIPT, (data) => {
+      const text = data.text.trim();
+      if (text) {
+        setTranscript(text);
+        onFinalRef.current?.(text);
+      }
+      // Auto-close after the first commit so the parent overlay flips
+      // to its review phase. Re-open on "Add more" by calling start()
+      // again — that mints a fresh token for a new session.
+      try {
+        conn.close();
+      } catch {
+        /* already closing */
+      }
+    });
+    conn.on(RealtimeEvents.AUTH_ERROR, () => {
+      console.error("Scribe auth error");
+      setState("denied");
+    });
+    conn.on(RealtimeEvents.ERROR, (err) => {
+      console.error("Scribe error", err);
+      setState("error");
+    });
+    conn.on(RealtimeEvents.CLOSE, () => {
+      connectionRef.current = null;
+      setState((s) =>
+        s === "listening" || s === "connecting" ? "idle" : s,
+      );
+    });
+  }, []);
 
   const stop = React.useCallback(() => {
-    const s = sessionRef.current;
-    if (!s) return;
+    const conn = connectionRef.current;
+    if (!conn) return;
     try {
-      s.recorder.stop();
+      conn.close();
     } catch {
-      /* already stopping → onstop will fire */
+      /* already closing */
     }
   }, []);
 
   React.useEffect(
     () => () => {
-      const s = sessionRef.current;
-      if (s) {
-        try {
-          s.recorder.stop();
-        } catch {
-          /* ignore */
-        }
-        teardown();
+      try {
+        connectionRef.current?.close();
+      } catch {
+        /* ignore */
       }
-      submitAbortRef.current?.abort();
     },
-    [teardown],
+    [],
   );
 
-  return { supported, state, transcript, start, stop };
+  return { supported: SUPPORTED, state, transcript, start, stop };
 }
 
 const LANG_STORAGE_KEY = "mochi:speech:lang";

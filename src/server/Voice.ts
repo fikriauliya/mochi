@@ -35,12 +35,21 @@ export class VoiceService extends Context.Tag("VoiceService")<
     readonly synthesize: (
       text: string,
     ) => Effect.Effect<Uint8Array, VoiceError>;
+
+    /**
+     * Mint a 15-min single-use token the browser can use to open the
+     * realtime Scribe WebSocket directly. Keeps the API key off the
+     * client.
+     */
+    readonly mintRealtimeToken: () => Effect.Effect<string, VoiceError>;
   }
 >() {}
 
 const STT_URL = "https://api.elevenlabs.io/v1/speech-to-text";
 const TTS_URL = (voiceId: string) =>
   `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}`;
+const TOKEN_URL = (kind: string) =>
+  `https://api.elevenlabs.io/v1/single-use-token/${encodeURIComponent(kind)}`;
 
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"; // Rachel — multilingual, warm
 const DEFAULT_TTS_MODEL = "eleven_turbo_v2_5";
@@ -180,6 +189,44 @@ export const VoiceLive = Layer.succeed(
           `[tts] ${text.length} chars → ${bytes.byteLength}B mp3 in ${Date.now() - t0}ms`,
         );
         return bytes;
+      }),
+
+    mintRealtimeToken: () =>
+      Effect.gen(function* () {
+        const key = apiKey();
+        if (!key) {
+          return yield* Effect.fail(
+            new VoiceError({
+              message: "ELEVENLABS_API_KEY is not set in .env",
+            }),
+          );
+        }
+        const res = yield* Effect.tryPromise({
+          try: () =>
+            fetch(TOKEN_URL("realtime_scribe"), {
+              method: "POST",
+              headers: { "xi-api-key": key },
+            }),
+          catch: (cause) =>
+            new VoiceError({ message: "token network error", cause }),
+        });
+        if (!res.ok) {
+          const body = yield* Effect.promise(() => readErrorBody(res));
+          return yield* Effect.fail(
+            new VoiceError({ message: `token ${res.status}: ${body}` }),
+          );
+        }
+        const json = yield* Effect.tryPromise({
+          try: () => res.json() as Promise<{ token?: string }>,
+          catch: (cause) =>
+            new VoiceError({ message: "token response not JSON", cause }),
+        });
+        if (!json.token) {
+          return yield* Effect.fail(
+            new VoiceError({ message: "token response missing token" }),
+          );
+        }
+        return json.token;
       }),
   }),
 );
