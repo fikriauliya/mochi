@@ -25,7 +25,6 @@ import {
   type SpeechLang,
   useSpeechLang,
 } from "@/lib/speech";
-import { speak, cancelSpeech } from "@/lib/tts";
 import { deleteApp, setFavorite, subscribeStream } from "@/lib/api";
 import type { App, AppKind, BuildEvent } from "@/lib/types";
 import { cn } from "@/lib/utils";
@@ -1023,45 +1022,18 @@ function KidBuildView({
   const [errorMessage, setErrorMessage] = React.useState<string>(app.lastError ?? "");
   const [showLog, setShowLog] = React.useState(false);
 
-  // Read the latest `lang` inside the stream handler via ref so a
-  // mid-build language toggle doesn't re-subscribe to the SSE (which
-  // would orphan the prior subscription and double-speak the done line).
-  const langRef = React.useRef(lang);
-  React.useEffect(() => {
-    langRef.current = lang;
-  });
-
   React.useEffect(() => {
     if (phase !== "cooking") return;
-    const l = langRef.current;
-    speak(
-      l === "id-ID"
-        ? "Mochi lagi bikin, sebentar ya!"
-        : "Mochi is making it, hang tight!",
-      l,
-    );
     const unsub = subscribeStream(app.id, (ev: BuildEvent) => {
       setEvents((prev) => [...prev, ev]);
       if (ev.type === "done") {
         setPhase("done");
-        const cur = langRef.current;
-        speak(cur === "id-ID" ? "Sudah jadi!" : "It's ready!", cur);
       } else if (ev.type === "error") {
         setPhase("error");
         setErrorMessage(ev.message);
-        const cur = langRef.current;
-        speak(
-          cur === "id-ID"
-            ? "Aduh, Mochi nyangkut. Coba lagi?"
-            : "Oops, Mochi got stuck. Try again?",
-          cur,
-        );
       }
     });
-    return () => {
-      unsub();
-      cancelSpeech();
-    };
+    return unsub;
   }, [app.id, phase]);
 
   // Auto-navigate forward when the build finishes successfully.
@@ -1075,7 +1047,7 @@ function KidBuildView({
     setEvents([]);
     setErrorMessage("");
     setPhase("cooking");
-    onRetry(app.id, app.prompt, langRef.current);
+    onRetry(app.id, app.prompt, lang);
   };
 
   const headline =

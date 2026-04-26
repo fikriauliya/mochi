@@ -88,9 +88,9 @@ Without `OPENAI_API_KEY` printables fail at the OpenAI call (apps still work). W
 
 ## Voice + camera
 
-- **Voice intake**: `KidPMOverlay` opens a WebSocket to a server-provisioned ElevenLabs Conversational AI agent ("Mochi PM"). The agent handles ASR + agent reasoning + TTS server-side; the browser only ships audio. The agent's `submit_requirements` client-tool call closes the loop and triggers the build.
-- **Mochi's voice during builds**: short canned lines ("Mochi is making it!", "It's ready!", "Oops, Mochi got stuck") spoken via `/api/voice/tts` (ElevenLabs streaming MP3 over a browser `MediaSource`).
+- **Voice intake**: `KidPMOverlay` opens a WebSocket to a server-provisioned ElevenLabs Conversational AI agent ("Mochi PM"). The agent handles ASR + agent reasoning + TTS server-side; the browser only ships audio. The agent's `submit_requirements` client-tool call closes the loop and triggers the build. The build view itself is silent — no narration, no canned lines.
 - **Camera scan**: `KidScanOverlay` uses `getUserMedia` (rear camera if available) for a single-frame JPEG capture; the bytes go to `/api/scan/worksheet` which calls Claude vision and returns a build spec.
+- **TTS in generated apps**: still wired up. The agent's SYSTEM_PROMPT documents `POST /api/voice/tts` so flashcards / read-aloud / quiz apps can speak through ElevenLabs without an API key.
 
 Browsers gate `getUserMedia` to secure contexts — `localhost` works; plain LAN HTTP from another device's browser doesn't. The Android WebView shell bypasses that gate, which is why voice + camera work over HTTP from a TV.
 

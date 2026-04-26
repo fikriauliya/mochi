@@ -158,7 +158,6 @@ One UI tree, three view kinds matching the URL: `home / build / open`. URL is mu
 - **`components/Mochi.tsx`** — the inline-SVG mascot. Animated breathing/blink idle + `typing` (squish + steam) + `happy` mouth state. Don't rebuild it from scratch.
 - **`components/AgentLog.tsx`** — pretty-prints streamed `BuildEvent`s in `KidBuildView`'s collapsible "Watch Mochi work" panel. One render path; failed `tool_result`s are shown wrapped, successes one-line.
 - **`lib/speech.ts`** — just the persisted `useSpeechLang()` (id-ID / en-US in localStorage) and the `SpeechLang` type. STT used to live here as `useSpeech` over Scribe v2 Realtime; both create and modify voice intake now flow through `KidPMOverlay` → `Conversation.startSession` instead, so the hook was removed.
-- **`lib/tts.ts`** — thin `speak(text, lang)` wrapper that cancels any in-flight utterance first.
 - **`lib/api.ts`** — typed `fetch` wrappers for `/api/apps/*`. `subscribeStream(appId, onEvent)` opens an `EventSource` and registers handlers per `BuildEvent.type`.
 - **`styles/globals.css`** — Tailwind v4 `@theme` block defining the cream/paper palette and Fraunces (display) + Nunito (body) typography. The mascot's breathing/squish/steam keyframes live in `src/index.css`.
 - **`tsconfig.json` excludes `apps/`** — agent-generated TSX is built by `Bun.build`, not type-checked by the host project.
