@@ -44,9 +44,12 @@ bun install
 
 # 2. Set up your .env (see "Required env" below)
 
-# 3. Provision the PM agent in your ElevenLabs workspace (one-time)
+# 3. Provision the PM agents in your ElevenLabs workspace (one-time;
+#    two agents are created — one Indonesian-primary, one English-primary;
+#    re-running the script PATCHes the existing ones)
 bun src/server/PmAgent.ts
-# → prints MOCHI_PM_AGENT_ID=agent_…  (paste into .env)
+# → prints MOCHI_PM_AGENT_ID_ID=agent_… and MOCHI_PM_AGENT_ID_EN=agent_…
+#   (paste both into .env)
 
 # 4. Start the server (HMR)
 task dev               # bun --hot src/index.ts
@@ -61,9 +64,13 @@ For HTTPS-only browsers (iPad Safari needs HTTPS for the microphone + camera), `
 Put these in `.env` — Bun auto-loads them.
 
 ```bash
-# ElevenLabs powers the PM agent + Mochi's TTS lines
+# ElevenLabs powers the PM agents (Indonesian + English) and the
+# /api/voice/tts endpoint that generated apps can use for read-aloud.
 ELEVENLABS_API_KEY=...
-MOCHI_PM_AGENT_ID=agent_...           # printed by `bun src/server/PmAgent.ts`
+MOCHI_PM_AGENT_ID_ID=agent_...        # Indonesian agent (default)
+MOCHI_PM_AGENT_ID_EN=agent_...        # English agent
+# Both printed by `bun src/server/PmAgent.ts`. Lang chip on the home
+# screen picks which one to connect to per session.
 
 # OpenAI powers printables + the dynamic-title gpt-4o-mini call
 OPENAI_API_KEY=sk-...
@@ -84,13 +91,15 @@ MOCHI_TTS_MODEL=eleven_turbo_v2_5
 - **`cli`** routes every Claude call (build, organize, suggest, vision) through the local `claude` CLI. Auth comes from your claude code login — no API key needed.
 - **`api`** swaps the build path to `@anthropic-ai/claude-agent-sdk` and the simple completions to the Anthropic Messages API. Requires `ANTHROPIC_API_KEY`.
 
-Without `OPENAI_API_KEY` printables fail at the OpenAI call (apps still work). Without `ELEVENLABS_API_KEY` + `MOCHI_PM_AGENT_ID` the voice flow fails — the type fallback still works.
+Without `OPENAI_API_KEY` printables fail at the OpenAI call (apps still work). Without `ELEVENLABS_API_KEY` + the two `MOCHI_PM_AGENT_ID_*` ids the voice flow fails — the type fallback still works.
 
 ## Voice + camera
 
-- **Voice intake**: `KidPMOverlay` opens a WebSocket to a server-provisioned ElevenLabs Conversational AI agent ("Mochi PM"). The agent handles ASR + agent reasoning + TTS server-side; the browser only ships audio. The agent's `submit_requirements` client-tool call closes the loop and triggers the build. The build view itself is silent — no narration, no canned lines.
+- **Voice intake**: `KidPMOverlay` opens a WebSocket to one of two server-provisioned ElevenLabs Conversational AI agents — the lang chip picks `MOCHI_PM_AGENT_ID_ID` (Indonesian) or `MOCHI_PM_AGENT_ID_EN` (English) per session. The agent handles ASR + agent reasoning + TTS server-side; the browser only ships audio. The agent's `submit_requirements` client-tool call closes the loop and triggers the build. The build view itself is silent — no narration, no canned lines, just bubbles + a progress ring around the mascot.
 - **Camera scan**: `KidScanOverlay` uses `getUserMedia` (rear camera if available) for a single-frame JPEG capture; the bytes go to `/api/scan/worksheet` which calls Claude vision and returns a build spec.
 - **TTS in generated apps**: still wired up. The agent's SYSTEM_PROMPT documents `POST /api/voice/tts` so flashcards / read-aloud / quiz apps can speak through ElevenLabs without an API key.
+- **iOS audio unlock**: `lib/audio.ts` pre-warms an `AudioContext` on the first `pointerdown` event so the PM agent's first message plays immediately on iPad — without it the gesture from tapping mic "expires" before the SDK's first audio frame arrives.
+- **TV remote D-pad**: `lib/spatial-nav.ts` listens for arrow keys and focuses the visually-closest focusable element. Android TV WebView doesn't move focus on arrow keys by default; without this the kid gets stuck on whichever header button auto-focused.
 
 Browsers gate `getUserMedia` to secure contexts — `localhost` works; plain LAN HTTP from another device's browser doesn't. The Android WebView shell bypasses that gate, which is why voice + camera work over HTTP from a TV.
 
@@ -145,7 +154,7 @@ src/
 │   ├── Vision.ts          worksheet photo → spec via Claude vision (CLI or API)
 │   ├── Organize.ts        sonnet → category groups (after every build)
 │   ├── Suggest.ts         sonnet → 5 fresh prompt ideas
-│   ├── PmAgent.ts         standalone CLI to provision/update the ElevenLabs PM agent
+│   ├── PmAgent.ts         standalone CLI to provision/update both PM agents (id + en)
 │   ├── Voice.ts           ElevenLabs proxy (TTS stream + signed agent URL)
 │   ├── Pricing.ts         per-million-token rate table for cost display
 │   ├── Jobs.ts            PubSub fanout, SSE, manifest decode, reorganize fork
@@ -157,7 +166,7 @@ src/
 │   ├── KidScanOverlay.tsx camera capture for worksheet → app
 │   ├── Mochi.tsx          the inline-SVG mascot
 │   └── AgentLog.tsx       streamed BuildEvent renderer
-├── lib/                   api / speech / tts / types / utils
+├── lib/                   api / speech / types / utils + audio (iOS unlock) + spatial-nav (TV D-pad)
 ├── icons/                 PWA icons
 └── index.html, frontend.tsx, App.tsx
 ```
@@ -175,7 +184,7 @@ The HTTP surface:
 | GET    | `/api/apps/:id/stream`     | live SSE — text, tool, tool_result, status, done, error         |
 | POST   | `/api/apps/reorganize`     | manually re-run the sonnet category step                        |
 | GET    | `/api/suggestions`         | dynamic prompt ideas (sonnet, server-cached on app-id set)      |
-| POST   | `/api/voice/agent-url`     | signed wss:// for the kid-PM Conversational AI agent            |
+| POST   | `/api/voice/agent-url`     | `?lang=en\|id` → signed wss:// for the matching PM agent       |
 | POST   | `/api/voice/transcribe`    | ElevenLabs STT proxy (used by generated apps that record audio) |
 | POST   | `/api/voice/tts`           | ElevenLabs TTS proxy (streaming MP3)                            |
 | POST   | `/api/scan/worksheet`      | photographed worksheet → spec via Claude vision                 |
