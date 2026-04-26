@@ -38,6 +38,8 @@ The host pre-seeds these helpers — use them, don't reinvent:
     playTone(freqHz, durationMs?) — short kid-friendly tone, mute-aware.
     useMute() → [muted, toggle] persisted to localStorage. Render a
     🔊/🔇 <button className="app-btn"> wired to toggle.
+    The file ./shared.tsx already exists in your cwd — Read it if
+    you need to confirm exact signatures.
 - Voice (USE when speaking or listening is part of the experience —
   flashcards, story read-aloud, pronunciation drills, voice journals,
   "say the answer" quizzes; skip for purely visual apps). The host

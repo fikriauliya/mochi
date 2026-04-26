@@ -386,6 +386,22 @@ export const JobsLive = Layer.effect(
         // ---- APP PATH (existing claude flow) ----
         const sessionId = app.sessionId;
 
+        // Drop shared.tsx + styles.css into cwd before spawning claude
+        // so the agent can `Read("./shared.tsx")` to inspect the helpers
+        // it's allowed to import. Without this, the files only land at
+        // bundle time and a Read returns not-found.
+        yield* builder
+          .seed(cwd)
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new ClaudeError({
+                  message: cause.message,
+                  cause,
+                }),
+            ),
+          );
+
         // Open Claude stream
         const tSpawnStart = Date.now();
         const stream = yield* claude.spawn({

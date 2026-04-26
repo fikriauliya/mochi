@@ -19,6 +19,14 @@ export class BuildService extends Context.Tag("BuildService")<
       cwd: string,
       title: string,
     ) => Effect.Effect<void, BuildError>;
+    /**
+     * Drop the host-owned helper files (`shared.tsx` + `styles.css`) into
+     * `cwd`. Called by `Jobs.ts` BEFORE spawning claude so the agent can
+     * `Read("./shared.tsx")` to inspect exported helpers, and so its
+     * `import "./shared"` resolves at bundle time without us racing to
+     * write the file mid-build.
+     */
+    readonly seed: (cwd: string) => Effect.Effect<void, BuildError>;
   }
 >() {}
 
@@ -128,7 +136,46 @@ export const BuildLive = Layer.effect(
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
 
+    /**
+     * Idempotent: writes the file only if it doesn't already exist, so
+     * pre-seeding before claude (Jobs) and the safety re-seed before
+     * bundle (here) play nicely together.
+     */
+    const writeIfMissing = (p: string, source: string, label: string) =>
+      Effect.gen(function* () {
+        const present = yield* fs.exists(p).pipe(
+          Effect.mapError(
+            () => new BuildError({ message: `could not stat ${label}` }),
+          ),
+        );
+        if (present) return;
+        yield* fs.writeFileString(p, source).pipe(
+          Effect.mapError(
+            (cause) =>
+              new BuildError({
+                message: `failed to seed ${label}`,
+                logs: String(cause),
+              }),
+          ),
+        );
+      });
+
+    const seed = (cwd: string) =>
+      Effect.gen(function* () {
+        yield* writeIfMissing(
+          path.join(cwd, "styles.css"),
+          STYLES_CSS,
+          "styles.css",
+        );
+        yield* writeIfMissing(
+          path.join(cwd, "shared.tsx"),
+          SHARED_TSX,
+          "shared.tsx",
+        );
+      });
+
     return BuildService.of({
+      seed,
       bundle: (cwd, title) =>
         Effect.gen(function* () {
           const entrypoint = path.join(cwd, "index.tsx");
@@ -148,32 +195,10 @@ export const BuildLive = Layer.effect(
             );
           }
 
-          // Server owns styles.css and shared.tsx — drop them in unless the
-          // agent wrote them (it shouldn't, but tolerate). styles.css carries
-          // the Tailwind entrypoint plus our utility component classes;
-          // shared.tsx exports the audio + mute helpers every kid app needs.
-          const sharedPath = path.join(cwd, "shared.tsx");
-          for (const [p, source, label] of [
-            [stylesPath, STYLES_CSS, "styles.css"],
-            [sharedPath, SHARED_TSX, "shared.tsx"],
-          ] as const) {
-            const present = yield* fs.exists(p).pipe(
-              Effect.mapError(
-                () => new BuildError({ message: `could not stat ${label}` }),
-              ),
-            );
-            if (!present) {
-              yield* fs.writeFileString(p, source).pipe(
-                Effect.mapError(
-                  (cause) =>
-                    new BuildError({
-                      message: `failed to seed ${label}`,
-                      logs: String(cause),
-                    }),
-                ),
-              );
-            }
-          }
+          // Defence in depth — Jobs.ts seeds these before spawning claude
+          // so the agent can Read them, but if anyone ever bypasses that
+          // path we still bundle correctly.
+          yield* seed(cwd);
 
           const result = yield* Effect.tryPromise({
             try: () =>
