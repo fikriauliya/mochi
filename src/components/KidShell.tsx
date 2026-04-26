@@ -1069,10 +1069,11 @@ function KidBuildView({
   const [events, setEvents] = React.useState<BuildEvent[]>([]);
   const [errorMessage, setErrorMessage] = React.useState<string>(app.lastError ?? "");
   const [showLog, setShowLog] = React.useState(false);
-  // Bubbles rising out of Mochi's "pot", one per claude tool event. Each
-  // is its own DOM node with a unique key + a short-lived CSS animation;
-  // the cull effect below trims oldest as new ones arrive so the list
-  // stays bounded across long builds.
+  // Bubbles rising out of Mochi's "pot". Spawned on a steady time
+  // interval, not tied to tool events — those land too sporadically
+  // to feel like progress. Each is its own DOM node with a unique key
+  // + a short-lived CSS animation; the cull effect below trims oldest
+  // so the list stays bounded.
   const [bubbles, setBubbles] = React.useState<
     ReadonlyArray<{ id: string; left: number }>
   >([]);
@@ -1094,15 +1095,24 @@ function KidBuildView({
       } else if (ev.type === "error") {
         setPhase("error");
         setErrorMessage(ev.message);
-      } else if (ev.type === "tool") {
-        setBubbles((bs) => [
-          ...bs.slice(-5),
-          { id: crypto.randomUUID(), left: 32 + Math.random() * 36 },
-        ]);
       }
     });
     return unsub;
   }, [app.id, phase]);
+
+  // Spawn a bubble every ~800ms while cooking. The 1.6s rise keyframe
+  // means up to ~3 are airborne at once; we cap the array at 6 to bound
+  // worst-case (tab backgrounded, intervals queued, etc).
+  React.useEffect(() => {
+    if (phase !== "cooking") return;
+    const interval = setInterval(() => {
+      setBubbles((bs) => [
+        ...bs.slice(-5),
+        { id: crypto.randomUUID(), left: 32 + Math.random() * 36 },
+      ]);
+    }, 800);
+    return () => clearInterval(interval);
+  }, [phase]);
 
   // Cull oldest bubble after its animation finishes (matches the 1.6s
   // `bubble-rise` keyframe in index.css).
