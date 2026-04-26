@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 import { Mochi } from "./Mochi";
 import { AgentLog } from "./AgentLog";
+import { KidPMOverlay } from "./KidPMOverlay";
 import {
   SPEECH_LANG_LABELS,
   type SpeechLang,
@@ -353,7 +354,33 @@ function KidHome(props: {
         </div>
       )}
 
-      {composer.kind === "voice" && (
+      {composer.kind === "voice" && composer.intent === "create" && (
+        // Create flow: hand off to the Conversational AI agent (Mochi PM)
+        // which gathers requirements over voice and submits a complete
+        // English spec via the submit_requirements client tool.
+        <KidPMOverlay
+          lang={lang}
+          outputKind={composer.outputKind ?? "app"}
+          onClose={() => setComposer({ kind: "idle" })}
+          onSwitchToType={() => {
+            const c = composer;
+            setComposer({
+              kind: "text",
+              intent: c.intent,
+              ...(c.outputKind !== undefined ? { outputKind: c.outputKind } : {}),
+            });
+          }}
+          onPrompt={(prompt) => {
+            const c = composer;
+            setComposer({ kind: "idle" });
+            onCreate(prompt, c.outputKind ?? "app", lang);
+          }}
+        />
+      )}
+
+      {composer.kind === "voice" && composer.intent === "modify" && (
+        // Modify keeps the simple one-shot mic — tweaks like "make it
+        // purple" don't need a PM session.
         <KidMicOverlay
           lang={lang}
           intent={composer.intent}
@@ -372,9 +399,7 @@ function KidHome(props: {
           onPrompt={(prompt) => {
             const c = composer;
             setComposer({ kind: "idle" });
-            if (c.intent === "create")
-              onCreate(prompt, c.outputKind ?? "app", lang);
-            else if (c.app) onModify(c.app.id, prompt, lang);
+            if (c.app) onModify(c.app.id, prompt, lang);
           }}
         />
       )}

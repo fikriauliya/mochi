@@ -52,6 +52,15 @@ export class VoiceService extends Context.Tag("VoiceService")<
      * client.
      */
     readonly mintRealtimeToken: () => Effect.Effect<string, VoiceError>;
+
+    /**
+     * Mint a signed wss:// URL the browser uses to connect to a
+     * Conversational AI agent (the kid-PM that gathers requirements).
+     * Keeps the API key off the client.
+     */
+    readonly mintAgentSignedUrl: (
+      agentId: string,
+    ) => Effect.Effect<string, VoiceError>;
   }
 >() {}
 
@@ -62,6 +71,8 @@ const TTS_STREAM_URL = (voiceId: string) =>
   `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream`;
 const TOKEN_URL = (kind: string) =>
   `https://api.elevenlabs.io/v1/single-use-token/${encodeURIComponent(kind)}`;
+const AGENT_SIGNED_URL = (agentId: string) =>
+  `https://api.elevenlabs.io/v1/convai/conversation/get-signed-url?agent_id=${encodeURIComponent(agentId)}`;
 
 const DEFAULT_VOICE_ID = "21m00Tcm4TlvDq8ikWAM"; // Rachel — multilingual, warm
 const DEFAULT_TTS_MODEL = "eleven_turbo_v2_5";
@@ -280,6 +291,54 @@ export const VoiceLive = Layer.succeed(
           );
         }
         return json.token;
+      }),
+
+    mintAgentSignedUrl: (agentId) =>
+      Effect.gen(function* () {
+        const key = apiKey();
+        if (!key) {
+          return yield* Effect.fail(
+            new VoiceError({
+              message: "ELEVENLABS_API_KEY is not set in .env",
+            }),
+          );
+        }
+        const res = yield* Effect.tryPromise({
+          try: () =>
+            fetch(AGENT_SIGNED_URL(agentId), {
+              method: "GET",
+              headers: { "xi-api-key": key },
+            }),
+          catch: (cause) =>
+            new VoiceError({
+              message: "agent signed-url network error",
+              cause,
+            }),
+        });
+        if (!res.ok) {
+          const body = yield* Effect.promise(() => readErrorBody(res));
+          return yield* Effect.fail(
+            new VoiceError({
+              message: `agent signed-url ${res.status}: ${body}`,
+            }),
+          );
+        }
+        const json = yield* Effect.tryPromise({
+          try: () => res.json() as Promise<{ signed_url?: string }>,
+          catch: (cause) =>
+            new VoiceError({
+              message: "agent signed-url response not JSON",
+              cause,
+            }),
+        });
+        if (!json.signed_url) {
+          return yield* Effect.fail(
+            new VoiceError({
+              message: "agent signed-url response missing signed_url",
+            }),
+          );
+        }
+        return json.signed_url;
       }),
   }),
 );

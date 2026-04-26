@@ -11,7 +11,11 @@ Mochi is a **family agentic app studio**, not a chatbot. A family member describ
 
 Both kinds share the same registry, library, build/SSE pipeline, and open view; the differentiation is internal. Voice/text composer pre-selects the kind via the home button you tapped (🎙 *Tap & talk* → app, 🖨 *Make a printable* → printable).
 
-There is one UI: **kid mode**. It's voice-first (Web Speech API + SpeechSynthesis), with text input as a fallback for adults and a TV remote / D-pad–friendly focus model. Default UI copy is English; STT + TTS default to Indonesian (`id-ID`) and toggle via a `🎙 ID/EN` chip in the corner.
+There is one UI: **kid mode**. It's voice-first, with text input as a fallback for adults and a TV remote / D-pad–friendly focus model. Default UI copy is English; STT + TTS default to Indonesian (`id-ID`) and toggle via a `🎙 ID/EN` chip in the corner.
+
+**Create flow is conversational.** Tapping the home mic doesn't open a one-shot recorder — it opens the `KidPMOverlay`, which connects to a server-provisioned ElevenLabs Conversational AI agent ("Mochi PM"). The agent asks 2–4 short kid-friendly questions, then calls a `submit_requirements` client tool with a complete English spec; the browser intercepts that tool call and POSTs to `/api/apps`, kicking off the build with a richer prompt than the kid would type. **Modify** keeps the simple one-shot mic — tweaks like "make it purple" don't need a PM session.
+
+Setup once per workspace: set `ELEVENLABS_API_KEY` in `.env`, run `bun src/server/PmAgent.ts` to create the agent, paste the printed `MOCHI_PM_AGENT_ID` into `.env`, and restart the server. Re-run the script after editing the prompt / tool schema in `PmAgent.ts` to PATCH the live agent.
 
 The product runs in three places:
 
@@ -88,6 +92,8 @@ Everything in `src/server/` is built on Effect-TS (`effect`, `@effect/platform`,
   - `generateMetadata(prompt)` calls `POST /v1/chat/completions` (model `gpt-4o-mini`, `response_format: json_object`) to translate any-language prompts into an English `{name, emoji, description}` manifest. Used both for new printables (in `Jobs.ts`) and for the `task apps:retitle-en` bulk-retitler.
   `Jobs.ts` calls these when `app.kind === "printable"` and skips the claude/bundler path entirely.
 - **`Sse.ts`** — formats a `Stream<BuildEvent>` into `event: <type>\ndata: <json>\n\n` chunks for the SSE endpoint.
+- **`Narrator.ts`** — `NarratorService.narrate(events, lang)` calls sonnet+low-effort with a JSON schema (via `SonnetJson.callJsonSchema`) to produce one short kid-friendly first-person line about what Mochi is doing right now. `Jobs.ts` forks a scoped narrator loop alongside each app build that batches recent events and triggers narration on tool events with an 8s minimum interval. The narration is published as a `narration` BuildEvent the browser plays through TTS — the live "voice acting" is the demo's wow factor, so don't disable it casually.
+- **`PmAgent.ts`** — standalone CLI (`bun src/server/PmAgent.ts`). Provisions / updates the ElevenLabs Conversational AI agent that gathers requirements from the kid before claude builds. Defines the agent's system prompt, first-message, voice, and `submit_requirements` client-tool schema. First run prints an `agent_id` to add to `.env` as `MOCHI_PM_AGENT_ID`; subsequent runs PATCH the existing agent so prompt tweaks ship. The agent is invoked from the browser via `Conversation.startSession({signedUrl, …})` from `@elevenlabs/client`; the signed URL is minted by `VoiceService.mintAgentSignedUrl` so the API key stays server-side.
 - **`HttpApi.ts`** — Bun.serve route table closed over the runtime. Every handler is an Effect; errors are funnelled through `handle()` → typed status codes. SSE responses are an `Effect.Stream<BuildEvent>` formatted as event-stream chunks via `Stream.toReadableStreamRuntime(stream, runtime)`. Also serves the PWA artifacts (`/manifest.webmanifest`, `/sw.js`, `/icons/:file`).
 - **`Main.ts`** — composes `RegistryLive`, `ClaudeLive`, `BuildLive` as siblings, then `JobsLive` consumes them, all resolved against `BunContext.layer` (FileSystem, Path, CommandExecutor). `runServer` reaches `Effect.runtime` for the runtime, hands it to `makeRoutes`, calls `Bun.serve`, and `Effect.never`s. `BunRuntime.runMain` in `src/index.ts` owns the lifecycle.
 
@@ -103,6 +109,10 @@ The HTTP routes:
 | GET    | `/api/apps/:id/stream`     | `Jobs.subscribe(id)` → SSE                                     |
 | POST   | `/api/apps/:id/modify`     | `Jobs.start(id, "modify", prompt)` (reuses `--resume`)         |
 | DELETE | `/api/apps/:id`            | `Registry.remove`                                              |
+| POST   | `/api/voice/agent-url`     | signed wss:// for the kid-PM Conversational AI agent           |
+| POST   | `/api/voice/token`         | 15-min single-use token for Scribe v2 Realtime STT             |
+| POST   | `/api/voice/transcribe`    | proxy to ElevenLabs STT (used by generated apps)               |
+| POST   | `/api/voice/tts`           | streaming MP3 from ElevenLabs (used by Mochi + generated apps) |
 | GET    | `/apps/:id/*`              | static-serve `apps/<id>/<rest>` (path traversal blocked)       |
 | GET    | `/manifest.webmanifest`    | PWA manifest                                                   |
 | GET    | `/sw.js`                   | service worker (registered only on HTTPS / localhost)          |
@@ -135,7 +145,8 @@ Modify on a printable concatenates the new prompt onto the previous one (`${app.
 One UI tree, three view kinds matching the URL: `home / build / open`. URL is mutated via the History API; `popstate` keeps the React state in sync. State machine + route mapping live in `src/App.tsx`.
 
 - **`App.tsx`** — view state, app list (`listApps`), and the action callbacks (`onCreate`, `onModify`, `onOpenApp`, `onBuildDone`, `onReload`). Always renders `<KidShell />`.
-- **`components/KidShell.tsx`** — the entire UI. One file because the views share state and primitives (mic overlay, type overlay, app menu). Routes between `KidHome / KidBuildView / KidOpenView` based on the view prop. Long-press a tile (700 ms) **or** tap the visible `⋯` corner button to open the app menu (Open / Modify / Open in tab / Delete). The mic overlay can swap to the type overlay mid-recording, carrying any partial transcript as a seed.
+- **`components/KidShell.tsx`** — the entire UI. One file because the views share state and primitives (mic overlay, type overlay, app menu). Routes between `KidHome / KidBuildView / KidOpenView` based on the view prop. Long-press a tile (700 ms) **or** tap the visible `⋯` corner button to open the app menu (Open / Modify / Open in tab / Delete). On `intent === "create"` the voice composer hands off to `KidPMOverlay`; on `intent === "modify"` it stays on the simple `KidMicOverlay` (one-shot Scribe Realtime).
+- **`components/KidPMOverlay.tsx`** — voice-only requirement gathering. Uses `Conversation.startSession({signedUrl, clientTools, dynamicVariables, overrides})` from `@elevenlabs/client`; the signed URL is fetched from `/api/voice/agent-url`. The agent's `submit_requirements` client tool is implemented here — when it fires, the overlay calls `onPrompt(spec)` and unmounts (cleanup ends the session). Mascot reflects `mode === "speaking" | "listening"`. On error, falls through to the type fallback so the demo never gets stuck.
 - **`components/Mochi.tsx`** — the inline-SVG mascot. Animated breathing/blink idle + `typing` (squish + steam) + `happy` mouth state. Don't rebuild it from scratch.
 - **`components/AgentLog.tsx`** — pretty-prints streamed `BuildEvent`s. Used in `KidBuildView`'s collapsible "Watch Mochi work" panel. Honours a `verbose` prop (persisted to `localStorage`) that surfaces raw `ClaudeStreamEvent` JSON and the `cost …` status line; non-verbose mode hides them.
 - **`lib/speech.ts`** — `useSpeech` hook around `webkitSpeechRecognition`. Has a configurable `silenceMs` (default 800 ms) that hard-stops the recognizer after a pause so short utterances don't wait for the browser's slow built-in end-of-speech detection. Falls back gracefully when the API is missing. `useSpeechLang()` persists `id-ID`/`en-US` in `localStorage`.

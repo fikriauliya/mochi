@@ -42,6 +42,11 @@ export const getRealtimeToken = (): Promise<string> =>
     .then((r) => asJson<{ token: string }>(r))
     .then((d) => d.token);
 
+export const getAgentSignedUrl = (): Promise<string> =>
+  fetch("/api/voice/agent-url", { method: "POST" })
+    .then((r) => asJson<{ signedUrl: string }>(r))
+    .then((d) => d.signedUrl);
+
 export const getApp = (id: string): Promise<App> =>
   fetch(`/api/apps/${encodeURIComponent(id)}`).then((r) => asJson<App>(r));
 

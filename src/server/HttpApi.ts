@@ -398,6 +398,29 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
         ),
     },
 
+    "/api/voice/agent-url": {
+      // Mint a signed wss:// URL for the kid-PM Conversational AI agent.
+      // The agent_id is server-side env so the client can't spin up
+      // arbitrary agents on our key.
+      POST: () =>
+        runP(
+          handle(
+            Effect.gen(function* () {
+              const agentId = process.env["MOCHI_PM_AGENT_ID"];
+              if (!agentId) {
+                return errorJson(
+                  500,
+                  "MOCHI_PM_AGENT_ID is not set; run `bun src/server/PmAgent.ts` to provision the agent",
+                );
+              }
+              const voice = yield* VoiceService;
+              const signedUrl = yield* voice.mintAgentSignedUrl(agentId);
+              return okJson({ signedUrl });
+            }),
+          ),
+        ),
+    },
+
     "/api/voice/tts": {
       POST: (req: Request) =>
         runP(
