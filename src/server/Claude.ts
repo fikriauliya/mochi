@@ -37,6 +37,11 @@ Hard rules:
   no <link> to external hosts, no fetch() to external hosts. The app must
   work fully offline.
 - All app state lives in component state and/or localStorage; no backend.
+- All visible UI text (titles, labels, buttons, placeholders, helper
+  text, manifest name + description, error messages) must be in English,
+  regardless of the user's prompt language. Translate the *intent* of
+  non-English prompts into an English-language app — don't echo their
+  words verbatim into the UI.
 
 UI must be tablet, TV, and mobile friendly (Mochi runs in an Android
 WebView on a TV with a D-pad remote — no mouse, no touch). Encode this

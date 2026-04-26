@@ -78,7 +78,7 @@ export function KidShell(props: ShellProps) {
   } = props;
 
   if (view.kind === "open" && currentApp) {
-    return <KidOpenView app={currentApp} onBack={onBack} />;
+    return <KidOpenView app={currentApp} onBack={onBack} onModify={onModify} />;
   }
   if (view.kind === "build" && currentApp) {
     return (
@@ -982,8 +982,21 @@ function KidBuildView({
 
 /* -------------------------------- Open -------------------------------- */
 
-function KidOpenView({ app, onBack }: { app: App; onBack: () => void }) {
-  const [iframeKey, setIframeKey] = React.useState(0);
+function KidOpenView({
+  app,
+  onBack,
+  onModify,
+}: {
+  app: App;
+  onBack: () => void;
+  onModify: (id: string, prompt: string) => void;
+}) {
+  const [iframeKey] = React.useState(0);
+  const [lang] = useSpeechLang();
+  const [composer, setComposer] = React.useState<
+    { kind: "idle" } | { kind: "voice" } | { kind: "text"; seed?: string }
+  >({ kind: "idle" });
+
   return (
     <div className="h-dvh w-screen flex flex-col bg-white">
       <div
@@ -995,6 +1008,7 @@ function KidOpenView({ app, onBack }: { app: App; onBack: () => void }) {
           aria-label="Back"
           autoFocus
           className="
+            shrink-0
             size-14 2xl:size-16 rounded-full
             bg-mochi-deep text-paper
             flex items-center justify-center
@@ -1007,7 +1021,7 @@ function KidOpenView({ app, onBack }: { app: App; onBack: () => void }) {
         </button>
 
         <h2
-          className="font-display text-xl sm:text-2xl 2xl:text-3xl text-ink flex items-center gap-2 truncate min-w-0"
+          className="font-display text-xl sm:text-2xl 2xl:text-3xl text-ink flex items-center gap-2 truncate min-w-0 flex-1"
           style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600' }}
         >
           <span className="text-2xl 2xl:text-3xl shrink-0" aria-hidden>
@@ -1015,6 +1029,22 @@ function KidOpenView({ app, onBack }: { app: App; onBack: () => void }) {
           </span>
           <span className="truncate">{app.name}</span>
         </h2>
+
+        <button
+          onClick={() => setComposer({ kind: "voice" })}
+          aria-label="Modify this app"
+          className="
+            shrink-0 inline-flex items-center justify-center gap-2
+            min-h-11 2xl:min-h-12 px-4 2xl:px-5 rounded-full
+            bg-mochi-deep text-paper font-semibold text-sm 2xl:text-base
+            shadow-[0_6px_16px_-6px_rgba(224,114,107,0.7)]
+            hover:scale-[1.03] active:scale-95 transition-transform
+            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+          "
+        >
+          <Pencil className="size-4 2xl:size-5" />
+          <span className="hidden sm:inline">Modify</span>
+        </button>
 
         <a
           href={`/apps/${app.id}/`}
@@ -1039,6 +1069,34 @@ function KidOpenView({ app, onBack }: { app: App; onBack: () => void }) {
         sandbox="allow-scripts allow-forms allow-popups allow-same-origin"
         className="flex-1 w-full bg-white"
       />
+
+      {composer.kind === "voice" && (
+        <KidMicOverlay
+          lang={lang}
+          intent="modify"
+          onClose={() => setComposer({ kind: "idle" })}
+          onSwitchToType={(seed) =>
+            setComposer({ kind: "text", ...(seed !== undefined ? { seed } : {}) })
+          }
+          onPrompt={(prompt) => {
+            setComposer({ kind: "idle" });
+            onModify(app.id, prompt);
+          }}
+        />
+      )}
+
+      {composer.kind === "text" && (
+        <KidTypeOverlay
+          intent="modify"
+          target={app}
+          initial={composer.seed ?? ""}
+          onClose={() => setComposer({ kind: "idle" })}
+          onSubmit={(prompt) => {
+            setComposer({ kind: "idle" });
+            onModify(app.id, prompt);
+          }}
+        />
+      )}
     </div>
   );
 }
