@@ -17,68 +17,38 @@ export type ClaudeSpawnArgs = {
 
 const SYSTEM_PROMPT = `
 You are building a small, mobile-first React + TypeScript web app for a family.
-The host server bundles and serves it; you only write the source. Output
-exactly two files in the current directory:
+The host bundles and serves it; you only write the source. Output exactly:
 
-1. index.tsx — a React 19 app with idiomatic JSX and hooks. Import hooks
-   from "react". Mount with createRoot from "react-dom/client" into
-   <div id="root">.
-2. manifest.json — {"name":"<short friendly name>","emoji":"<one emoji>",
-   "description":"<one sentence>"}.
+1. index.tsx — React 19. Mount with createRoot from "react-dom/client"
+   into <div id="root">.
+2. manifest.json — {"name":"<short>","emoji":"<one>","description":"<one sentence>"}.
 
-Styling: use Tailwind v4 utility classes directly in className. The host
-auto-wires a Tailwind entrypoint and the bundler scans your index.tsx for
-class usage at build time, so you do not need to import any CSS file or
-write any <style> tags. Don't write a styles.css — the server owns it.
+The host pre-seeds these helpers — use them, don't reinvent:
+
+- Root: <div className="app-shell">. Full-height column + safe-area
+  padding (handles TV overscan + phone notches).
+- Buttons: className="app-btn …" — 56px+ height with a visible focus
+  ring (D-pad / TV remote friendly). Add color via bg-* / text-*.
+  Use real <button>/<a>; never <div onClick>.
+- Fluid type: app-h1 (page titles), app-h2 (sections), app-display
+  (big numbers), app-body (text), app-tiny (small print).
+- Sound: import { playTone, useMute } from "./shared".
+    playTone(freqHz, durationMs?) — short kid-friendly tone, mute-aware.
+    useMute() → [muted, toggle] persisted to localStorage. Render a
+    🔊/🔇 <button className="app-btn"> wired to toggle.
 
 Hard rules:
-- Do not write index.html, styles.css, package.json, or any config file.
-- Do not import from npm packages other than react / react-dom. No CDNs,
-  no <link> to external hosts, no fetch() to external hosts. The app must
-  work fully offline.
-- All app state lives in component state and/or localStorage; no backend.
-- All visible UI text (titles, labels, buttons, placeholders, helper
-  text, manifest name + description, error messages) must be in English,
-  regardless of the user's prompt language. Translate the *intent* of
-  non-English prompts into an English-language app — don't echo their
-  words verbatim into the UI.
-
-UI must be tablet, TV, and mobile friendly (Mochi runs in an Android
-WebView on a TV with a D-pad remote — no mouse, no touch). Encode this
-through Tailwind utilities:
-- Interactive things are real focusable elements (<button>, <a>), never
-  <div onClick>. Targets ≥56px tall — use min-h-14 (56px) or larger.
-- A visible focus ring on every focusable element. The host hasn't
-  preconfigured a default; add it yourself, e.g.:
-    focus-visible:outline-none focus-visible:ring-4
-    focus-visible:ring-orange-500 focus-visible:ring-offset-2
-- No hover-only behaviour — everything that fires on :hover must also
-  fire on :focus / :focus-visible. Pair hover: with focus-visible:.
-- Body text uses fluid sizing — Tailwind 4 supports arbitrary values:
-    text-[clamp(1.125rem,2.5vw,1.75rem)]
-  Headings: text-[clamp(1.75rem,6vw,3.5rem)].
-- Safe area on the root element so TV overscan & phone notches don't
-  clip content:
-    pt-[max(20px,env(safe-area-inset-top))]
-    pb-[max(20px,env(safe-area-inset-bottom))]
-    pl-[max(20px,env(safe-area-inset-left))]
-    pr-[max(20px,env(safe-area-inset-right))]
-- Tab order matches visual order — don't use positive tabindex values.
-- Auto-focus the primary action when a screen mounts (autoFocus on the
-  most important <button> in the initial render).
-- Warm colors, generous spacing, system fonts (default Tailwind sans),
-  inline SVG icons.
-
-Sound effects (kids love them, and they make a TV feel alive):
-- Synthesize short tones with the Web Audio API — no audio files. A
-  single AudioContext + Oscillator + Gain envelope handles taps,
-  success chimes, and error blips.
-- Lazily create the AudioContext on the first user interaction (autoplay
-  policies block it before then). Reuse one context for the whole app.
-- Short envelopes (≤200ms total) and low gain (peak ≤ 0.2). TVs amplify
-  everything — quiet is the default.
-- Provide a small mute toggle (🔊 / 🔇 <button>) and persist the choice
-  in localStorage so a parent can silence the app once.
+- Don't write index.html, styles.css, shared.tsx, or any config — host owns them.
+- Imports allowed: "react", "react-dom/client", "./shared". No other npm.
+  No CDNs, no <link> to external hosts, no fetch() to external hosts.
+- All state in component state and/or localStorage. No backend.
+- All visible UI text in English regardless of prompt language. Translate
+  the *intent* of non-English prompts — don't echo their words verbatim.
+- Tailwind v4 utility classes for everything else. No <style> tags. No
+  external fonts. Inline SVG for icons.
+- autoFocus the primary action on mount. Tab order matches visual order
+  (no positive tabindex).
+- Pair hover: with focus-visible: — TV has no mouse.
 `.trim();
 
 const decodeEvent = S.decodeUnknown(ClaudeStreamEvent);

@@ -37,10 +37,82 @@ const indexHtmlTemplate = (title: string) => `<!doctype html>
 </html>
 `;
 
-// Minimal Tailwind entrypoint we drop into every app's cwd before bundling.
-// The agent writes utility classes directly in JSX; bun-plugin-tailwind
-// scans index.tsx during build and only emits the utilities actually used.
-const STYLES_CSS = `@import "tailwindcss";\n`;
+// Tailwind entrypoint + a small set of host-owned utility classes the
+// generated apps reference (.app-shell, .app-btn, .app-h1/h2/display/body
+// /tiny). Centralising these saves the agent from re-emitting ~80–120 chars
+// of `pt-[max(20px,env(safe-area-inset-top))]` / `text-[clamp(...)]` /
+// `focus-visible:ring-…` strings on every element. bun-plugin-tailwind
+// processes the @apply directives during build.
+const STYLES_CSS = `@import "tailwindcss";
+
+@layer components {
+  .app-shell {
+    @apply min-h-screen flex flex-col items-center;
+    padding-top: max(20px, env(safe-area-inset-top));
+    padding-bottom: max(20px, env(safe-area-inset-bottom));
+    padding-left: max(20px, env(safe-area-inset-left));
+    padding-right: max(20px, env(safe-area-inset-right));
+  }
+  .app-btn {
+    @apply min-h-14 px-4 rounded-2xl font-semibold transition-colors;
+    @apply focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-orange-500 focus-visible:ring-offset-2;
+  }
+  .app-h1      { font-size: clamp(1.75rem, 6vw, 3.5rem);   line-height: 1.1; @apply font-bold; }
+  .app-h2      { font-size: clamp(1.25rem, 4vw, 2.25rem);  line-height: 1.2; @apply font-bold; }
+  .app-display { font-size: clamp(2rem, 7vw, 4rem);        line-height: 1;   @apply font-bold; }
+  .app-body    { font-size: clamp(1.125rem, 2.5vw, 1.75rem); }
+  .app-tiny    { font-size: clamp(0.85rem, 1.5vw, 1.1rem); }
+}
+`;
+
+// Audio + mute helpers seeded into apps/<id>/shared.tsx so generated apps
+// can `import { playTone, useMute } from "./shared"` instead of writing
+// ~25 lines of AudioContext + localStorage scaffolding every build.
+const SHARED_TSX = `import { useCallback, useState } from "react";
+
+let ctx: AudioContext | null = null;
+const isMuted = (): boolean =>
+  typeof localStorage !== "undefined" && localStorage.getItem("muted") === "1";
+
+/**
+ * Synthesize a short tone for kid-friendly UI feedback. Auto-respects mute.
+ * Lazily creates one AudioContext on first call (autoplay policies block
+ * pre-interaction). Quiet by default — TVs amplify everything.
+ */
+export function playTone(freq = 440, durationMs = 80, peakGain = 0.15): void {
+  if (isMuted()) return;
+  try {
+    if (!ctx) ctx = new AudioContext();
+    const c = ctx;
+    const osc = c.createOscillator();
+    const gain = c.createGain();
+    osc.connect(gain);
+    gain.connect(c.destination);
+    osc.frequency.value = freq;
+    const t = c.currentTime;
+    gain.gain.setValueAtTime(0, t);
+    gain.gain.linearRampToValueAtTime(peakGain, t + 0.01);
+    gain.gain.linearRampToValueAtTime(0, t + durationMs / 1000);
+    osc.start(t);
+    osc.stop(t + durationMs / 1000);
+  } catch {
+    /* AudioContext unavailable — silent fallback is fine */
+  }
+}
+
+/** Persisted mute toggle. Returns [muted, toggle]. */
+export function useMute(): [boolean, () => void] {
+  const [muted, setMuted] = useState<boolean>(() => isMuted());
+  const toggle = useCallback(() => {
+    setMuted((m) => {
+      const next = !m;
+      localStorage.setItem("muted", next ? "1" : "0");
+      return next;
+    });
+  }, []);
+  return [muted, toggle];
+}
+`;
 
 function escapeHtml(s: string): string {
   return s
@@ -76,23 +148,31 @@ export const BuildLive = Layer.effect(
             );
           }
 
-          // Server owns styles.css — drop in a one-line Tailwind entrypoint
-          // unless the agent wrote one (it shouldn't, but tolerate it).
-          const stylesExists = yield* fs.exists(stylesPath).pipe(
-            Effect.mapError(
-              () => new BuildError({ message: "could not stat styles.css" }),
-            ),
-          );
-          if (!stylesExists) {
-            yield* fs.writeFileString(stylesPath, STYLES_CSS).pipe(
+          // Server owns styles.css and shared.tsx — drop them in unless the
+          // agent wrote them (it shouldn't, but tolerate). styles.css carries
+          // the Tailwind entrypoint plus our utility component classes;
+          // shared.tsx exports the audio + mute helpers every kid app needs.
+          const sharedPath = path.join(cwd, "shared.tsx");
+          for (const [p, source, label] of [
+            [stylesPath, STYLES_CSS, "styles.css"],
+            [sharedPath, SHARED_TSX, "shared.tsx"],
+          ] as const) {
+            const present = yield* fs.exists(p).pipe(
               Effect.mapError(
-                (cause) =>
-                  new BuildError({
-                    message: "failed to seed styles.css",
-                    logs: String(cause),
-                  }),
+                () => new BuildError({ message: `could not stat ${label}` }),
               ),
             );
+            if (!present) {
+              yield* fs.writeFileString(p, source).pipe(
+                Effect.mapError(
+                  (cause) =>
+                    new BuildError({
+                      message: `failed to seed ${label}`,
+                      logs: String(cause),
+                    }),
+                ),
+              );
+            }
           }
 
           const result = yield* Effect.tryPromise({
