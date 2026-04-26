@@ -114,9 +114,20 @@ export function App() {
     [navigate],
   );
 
+  // Route based on the app's current status:
+  //  - ready   → /open/:id (the iframe)
+  //  - building → /build/:id (the live log so the user can watch progress)
+  //  - error   → /build/:id (the build view shows the failure + retry)
   const onOpenApp = React.useCallback(
-    (id: string) => navigate({ kind: "open", appId: id }),
-    [navigate],
+    (id: string) => {
+      const app = apps.find((a) => a.id === id);
+      const target: View =
+        app && app.status !== "ready"
+          ? { kind: "build", appId: id }
+          : { kind: "open", appId: id };
+      navigate(target);
+    },
+    [apps, navigate],
   );
 
   const onBackHome = React.useCallback(

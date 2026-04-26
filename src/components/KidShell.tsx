@@ -333,20 +333,20 @@ function KidAppTile({
       className={cn(
         "relative aspect-square rounded-3xl border",
         "shadow-[0_1px_0_var(--color-paper-shadow),0_18px_30px_-22px_rgba(42,36,33,0.35)]",
-        "transition-transform",
-        isReady && "bg-paper border-line hover:scale-[1.04] active:scale-[0.98]",
+        "transition-transform hover:scale-[1.04] active:scale-[0.98]",
+        isReady && "bg-paper border-line",
         isBuilding && "bg-mochi-soft border-mochi-deep/40",
         isError && "bg-mom-soft border-mom/40",
       )}
     >
       <button
         {...longPress.handlers}
-        onClick={() => isReady && onOpen(app.id)}
-        disabled={!isReady}
+        // Tap is always live: ready → open, building → live log, error →
+        // build view with retry. Routing is decided by the parent.
+        onClick={() => onOpen(app.id)}
         className={cn(
           "absolute inset-0 rounded-3xl p-3",
-          "flex flex-col items-center justify-center gap-2",
-          isReady ? "cursor-pointer" : "cursor-help",
+          "flex flex-col items-center justify-center gap-2 cursor-pointer",
           "focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft",
         )}
       >
