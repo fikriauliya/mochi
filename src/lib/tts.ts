@@ -1,4 +1,14 @@
 import type { SpeechLang } from "./speech";
+import { isAbortError } from "./utils";
+
+/**
+ * The DOMException message used as the abort reason when speech is
+ * cancelled. Imported by `frontend.tsx`'s window-level rejection
+ * handler so that extension-induced "Uncaught (in promise) AbortError"
+ * noise from this specific abort is suppressed; everything else still
+ * surfaces.
+ */
+export const SPEECH_ABORT_REASON = "speech cancelled";
 
 /**
  * Streaming TTS via ElevenLabs (proxied through `/api/voice/tts`).
@@ -32,7 +42,10 @@ function ensureAudioEl(): HTMLAudioElement | null {
 
 function clearActive(): void {
   if (activeAbort) {
-    activeAbort.abort();
+    // Explicit reason so any awaiter that surfaces signal.reason gets
+    // a clear message instead of the default "signal is aborted
+    // without reason". Matched by frontend.tsx's rejection filter.
+    activeAbort.abort(new DOMException(SPEECH_ABORT_REASON, "AbortError"));
     activeAbort = null;
   }
   if (activeUrl) {
@@ -42,6 +55,17 @@ function clearActive(): void {
       /* ignore */
     }
     activeUrl = null;
+  }
+  // Detach the audio element from whatever MediaSource we had attached
+  // so it (and its SourceBuffer) becomes eligible for GC. Back-to-back
+  // speak() calls leak one MediaSource each without this.
+  if (audioEl) {
+    try {
+      audioEl.removeAttribute("src");
+      audioEl.load();
+    } catch {
+      /* ignore */
+    }
   }
 }
 
@@ -63,10 +87,15 @@ export function speak(text: string, _lang: SpeechLang = "id-ID"): void {
   } catch {
     /* ignore */
   }
-
   const ctrl = new AbortController();
   activeAbort = ctrl;
-  void play(el, trimmed, ctrl);
+  // play() awaits multiple abortable resources (fetch, reader,
+  // MediaSource sourceopen). Catch outside the inner try/catches so
+  // the strict-mode cleanup doesn't surface an "unhandled rejection".
+  play(el, trimmed, ctrl).catch((err) => {
+    if (isAbortError(err)) return;
+    console.warn("speak failed", err);
+  });
 }
 
 async function play(
@@ -206,8 +235,6 @@ export function cancelSpeech(): void {
   if (audioEl) {
     try {
       audioEl.pause();
-      audioEl.removeAttribute("src");
-      audioEl.load();
     } catch {
       /* ignore */
     }

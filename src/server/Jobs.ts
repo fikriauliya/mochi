@@ -13,7 +13,6 @@ import {
 } from "effect";
 import { BuildService } from "./Build";
 import { ClaudeService, ClaudeError } from "./Claude";
-import { NarratorService } from "./Narrator";
 import { OrganizeService } from "./Organize";
 import { computeCost, formatCost, type Usage } from "./Pricing";
 import { PrintableService } from "./Printable";
@@ -193,7 +192,6 @@ export const JobsLive = Layer.effect(
     const builder = yield* BuildService;
     const printable = yield* PrintableService;
     const organizer = yield* OrganizeService;
-    const narrator = yield* NarratorService;
     const fs = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
     const jobs = yield* Ref.make<ReadonlyMap<string, ActiveJob>>(new Map());
@@ -387,67 +385,6 @@ export const JobsLive = Layer.effect(
 
         // ---- APP PATH (existing claude flow) ----
         const sessionId = app.sessionId;
-
-        // Fork the narrator: subscribes to the same pubsub we publish into,
-        // batches recent build events, and every ~8s asks sonnet for one
-        // short kid-friendly first-person line ("now I'm picking colors!").
-        // The narration is published back as a `narration` BuildEvent that
-        // the browser plays through TTS. Best-effort — failures are
-        // swallowed inside the loop. forkScoped ties the loop's lifetime
-        // to runJob's scope so it dies cleanly with the build.
-        yield* Effect.forkScoped(
-          Effect.gen(function* () {
-            const buffer: BuildEvent[] = [];
-            let lastAt = Date.now();
-            let busy = false;
-            const MIN_INTERVAL = 8000;
-            yield* Stream.fromPubSub(pubsub).pipe(
-              Stream.takeUntil(
-                (ev) => ev.type === "done" || ev.type === "error",
-              ),
-              Stream.runForEach((ev) =>
-                Effect.gen(function* () {
-                  if (
-                    ev.type === "done" ||
-                    ev.type === "error" ||
-                    ev.type === "raw" ||
-                    ev.type === "narration" ||
-                    ev.type === "status"
-                  ) {
-                    return;
-                  }
-                  buffer.push(ev);
-                  if (buffer.length > 12) {
-                    buffer.splice(0, buffer.length - 12);
-                  }
-                  // Trigger narration on tool events only (clear milestones);
-                  // the buffer carries text/tool_result for context.
-                  if (ev.type !== "tool") return;
-                  if (busy) return;
-                  if (Date.now() - lastAt < MIN_INTERVAL) return;
-                  busy = true;
-                  lastAt = Date.now();
-                  const recent = buffer.slice();
-                  yield* Effect.forkDaemon(
-                    narrator.narrate(recent, lang).pipe(
-                      Effect.flatMap((text) =>
-                        text
-                          ? publish({ type: "narration", text, lang })
-                          : Effect.void,
-                      ),
-                      Effect.catchAll(() => Effect.void),
-                      Effect.ensuring(
-                        Effect.sync(() => {
-                          busy = false;
-                        }),
-                      ),
-                    ),
-                  );
-                }),
-              ),
-            );
-          }),
-        );
 
         // Open Claude stream
         const tSpawnStart = Date.now();

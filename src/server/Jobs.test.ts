@@ -7,7 +7,6 @@ import { Effect, Exit, Layer, Stream } from "effect";
 import { BuildLive } from "./Build";
 import { ClaudeService, type ClaudeError } from "./Claude";
 import { JobsLive, JobsService, projectClaudeEvent } from "./Jobs";
-import { NarratorService } from "./Narrator";
 import { OrganizeService } from "./Organize";
 import { PrintableError, PrintableService } from "./Printable";
 import { makeRegistryLive, RegistryService } from "./Registry";
@@ -40,15 +39,6 @@ const StubOrganizeLive = Layer.succeed(
   OrganizeService.of({
     organize: (apps) =>
       Effect.succeed([{ name: "", appIds: apps.map((a) => a.id) }]),
-  }),
-);
-
-// Narrator: tests don't assert narration output, just that wiring works.
-// Returning empty short-circuits the publish so the build stream stays clean.
-const StubNarratorLive = Layer.succeed(
-  NarratorService,
-  NarratorService.of({
-    narrate: () => Effect.succeed(""),
   }),
 );
 
@@ -248,7 +238,6 @@ const TestServices = (
         BuildLive,
         StubPrintableLive,
         StubOrganizeLive,
-        StubNarratorLive,
       ),
     ),
     Layer.provideMerge(BunContext.layer),
@@ -406,7 +395,6 @@ describe("Jobs (end-to-end with mock claude)", () => {
           BuildLive,
           StubPrintableLive,
           StubOrganizeLive,
-          StubNarratorLive,
         ),
       ),
       Layer.provideMerge(BunContext.layer),

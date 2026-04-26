@@ -46,10 +46,10 @@ export const SpeechLang = S.Literal("id-ID", "en-US");
 export type SpeechLang = S.Schema.Type<typeof SpeechLang>;
 
 /**
- * Body of POST /api/apps. `kind` and `lang` are optional; legacy clients
- * posting just `{ prompt }` get an interactive app and Indonesian narration.
- * `lang` is used by the server-side narrator to generate voice lines in
- * the kid's language during the build.
+ * Body of POST /api/apps. `kind` is optional; legacy clients posting
+ * just `{ prompt }` get an interactive app. `lang` is sent by the
+ * frontend for forward-compat with future server-side use cases — the
+ * server currently ignores it.
  */
 export const CreateAppRequest = S.Struct({
   prompt: S.String.pipe(S.minLength(1), S.maxLength(2000)),
@@ -87,15 +87,6 @@ export const BuildEvent = S.Union(
   // Full JSON of the original claude stream-json event. Always emitted
   // alongside the projection; the UI hides them unless verbose mode is on.
   S.Struct({ type: S.Literal("raw"), json: S.String, t: T }),
-  // Mochi narrating its own progress in the user's language. Generated
-  // server-side by NarratorService (a small sonnet call). The browser
-  // plays `text` through TTS; the log surfaces it as a 🎙 line.
-  S.Struct({
-    type: S.Literal("narration"),
-    text: S.String,
-    lang: SpeechLang,
-    t: T,
-  }),
 );
 export type BuildEvent = S.Schema.Type<typeof BuildEvent>;
 

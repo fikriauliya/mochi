@@ -8,6 +8,27 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { SPEECH_ABORT_REASON } from "./lib/tts";
+import { isAbortError } from "./lib/utils";
+
+// Some browser extensions (translation tools, etc.) monkey-patch
+// `window.fetch` and re-throw its AbortError on a separate promise we
+// can't catch from inside `lib/tts.ts`. Suppress that exact reason —
+// anything else still surfaces. Guarded so HMR re-imports don't keep
+// stacking new listeners across the dev session.
+type WindowWithFlag = Window & { __mochiSpeechAbortHandler?: true };
+if (typeof window !== "undefined") {
+  const w = window as WindowWithFlag;
+  if (!w.__mochiSpeechAbortHandler) {
+    w.__mochiSpeechAbortHandler = true;
+    window.addEventListener("unhandledrejection", (event) => {
+      const reason = event.reason;
+      if (isAbortError(reason) && reason.message === SPEECH_ABORT_REASON) {
+        event.preventDefault();
+      }
+    });
+  }
+}
 
 const elem = document.getElementById("root")!;
 const app = (

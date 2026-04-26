@@ -1039,14 +1039,6 @@ function KidBuildView({
     langRef.current = lang;
   });
 
-  // Lets the SSE callback skip late narrations once we've already moved
-  // past `cooking` — otherwise a stale narration could cancel the
-  // "It's ready!" speech.
-  const phaseRef = React.useRef(phase);
-  React.useEffect(() => {
-    phaseRef.current = phase;
-  }, [phase]);
-
   React.useEffect(() => {
     if (phase !== "cooking") return;
     const l = langRef.current;
@@ -1072,13 +1064,6 @@ function KidBuildView({
             : "Oops, Mochi got stuck. Try again?",
           cur,
         );
-      } else if (ev.type === "narration") {
-        // Server-generated voice line ("now I'm picking colors!"). Speak
-        // it in whatever language the narrator targeted; ignore stragglers
-        // that race past the terminal event so the done/error speech wins.
-        if (phaseRef.current === "cooking") {
-          speak(ev.text, ev.lang);
-        }
       }
     });
     return () => {

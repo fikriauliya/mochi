@@ -97,10 +97,6 @@ function LogLine({ ev, verbose }: { ev: BuildEvent; verbose: boolean }) {
           {prettyJson(ev.json)}
         </pre>
       );
-    case "narration":
-      return (
-        <div className="text-mochi-deep italic">🎙 {ev.text}</div>
-      );
   }
 }
 

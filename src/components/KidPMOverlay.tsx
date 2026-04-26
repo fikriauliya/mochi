@@ -30,6 +30,15 @@ type Phase = "connecting" | "talking" | "submitting" | "error";
 
 type LatestMessage = { role: Role; text: string };
 
+// Verbose console traces only when the family flips `mochi:verbose=1`
+// (the same flag AgentLog reads). Keeps the console clean during demos
+// — and importantly keeps user transcripts off the default console.
+const dbg: (...args: unknown[]) => void =
+  typeof window !== "undefined" &&
+  window.localStorage.getItem("mochi:verbose") === "1"
+    ? (...args) => console.log("[pm]", ...args)
+    : () => {};
+
 export function KidPMOverlay({
   lang,
   intent,
@@ -55,47 +64,53 @@ export function KidPMOverlay({
 
   const conversationRef = React.useRef<Conversation | null>(null);
   const submittedRef = React.useRef(false);
+  // Survive React 19 strict-mode mount→cleanup→mount: `initialisedRef`
+  // dedupes the second mount; the cleanup defers teardown via setTimeout
+  // so the remount clears the timer before it fires, and only a real
+  // unmount tears down the in-flight Conversation handshake.
+  const initialisedRef = React.useRef(false);
+  const pendingTeardownRef = React.useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   React.useEffect(() => {
-    let alive = true;
+    if (pendingTeardownRef.current) {
+      clearTimeout(pendingTeardownRef.current);
+      pendingTeardownRef.current = null;
+    }
+    if (initialisedRef.current) return;
+    initialisedRef.current = true;
+
+    const abortController = new AbortController();
 
     (async () => {
       let signedUrl: string;
       try {
         signedUrl = await getAgentSignedUrl();
       } catch (err) {
-        if (!alive) return;
+        if (abortController.signal.aborted) return;
         const msg =
           err instanceof Error ? err.message : "Couldn't reach the helper";
-        console.warn("agent signed-url failed", err);
+        console.warn("[pm] signed-url FAILED", err);
         setErrorMsg(msg);
         setPhase("error");
         return;
       }
-      if (!alive) return;
+      if (abortController.signal.aborted) return;
 
       try {
-        const firstMessage =
-          intent === "modify" && existingApp
-            ? `Hi! What should I change about ${existingApp.name}?`
-            : "Hi! It's Mochi! What should we make for you today?";
-
         const conv = await Conversation.startSession({
           signedUrl,
+          // Belt-and-braces: the SDK aborts the in-flight handshake +
+          // tears down the audio worklet when this fires. Pairs with the
+          // initialisedRef guard above to prevent the strict-mode dual
+          // mount from leaving an orphan WebSocket behind.
+          abortController,
           dynamicVariables: {
             intent,
             output_kind: outputKind,
             existing_name: existingApp?.name ?? "",
             existing_description: existingApp?.description ?? "",
-          },
-          // Per-session overrides: language hint (multilingual agents
-          // only) and a context-aware first message so we don't need a
-          // separate agent for modify.
-          overrides: {
-            agent: {
-              language: lang === "id-ID" ? "id" : "en",
-              firstMessage,
-            },
           },
           clientTools: {
             submit_requirements: ({ spec }) => {
@@ -104,46 +119,47 @@ export function KidPMOverlay({
               if (submittedRef.current) return "already submitted";
               submittedRef.current = true;
               setPhase("submitting");
-              // Defer onPrompt one tick so the agent's "Awesome, I'm
-              // gonna make it!" line gets a moment to land before the
-              // overlay unmounts and cuts the audio.
-              setTimeout(() => {
-                onPrompt(trimmed);
-              }, 250);
+              // End the conversation synchronously so the agent's voice
+              // stops before the build view's "Mochi is making it!" TTS
+              // starts — otherwise the two overlap and the kid hears
+              // two Mochis at once.
+              conversationRef.current?.endSession().catch(() => {});
+              onPrompt(trimmed);
               return "submitted";
             },
           },
-          onConnect: () => {
-            if (!alive) return;
+          onConnect: ({ conversationId }) => {
+            dbg("onConnect", conversationId);
             setPhase("talking");
           },
+          onDisconnect: (details) => dbg("onDisconnect", details),
+          onStatusChange: ({ status }) => dbg("onStatusChange", status),
           onModeChange: ({ mode: m }) => {
-            if (!alive) return;
+            dbg("onModeChange", m);
             setMode(m);
           },
           onMessage: ({ message, role }) => {
-            if (!alive) return;
+            dbg("onMessage", role, message);
             const text = message.trim();
             if (!text) return;
             setLatest({ role, text });
           },
-          onError: (msg) => {
-            if (!alive) return;
-            console.warn("PM agent error", msg);
+          onError: (msg, ctx) => {
+            console.warn("[pm] onError", msg, ctx);
             if (!submittedRef.current) {
               setErrorMsg(typeof msg === "string" ? msg : "Connection error");
               setPhase("error");
             }
           },
         });
-        if (!alive) {
+        if (abortController.signal.aborted) {
           await conv.endSession().catch(() => {});
           return;
         }
         conversationRef.current = conv;
       } catch (err) {
-        if (!alive) return;
-        console.warn("Conversation.startSession failed", err);
+        if (abortController.signal.aborted) return;
+        console.warn("[pm] startSession FAILED", err);
         setErrorMsg(
           err instanceof Error ? err.message : "Connection failed",
         );
@@ -152,14 +168,16 @@ export function KidPMOverlay({
     })();
 
     return () => {
-      alive = false;
-      const conv = conversationRef.current;
-      if (conv) {
-        conv.endSession().catch(() => {
-          /* already closed */
-        });
-        conversationRef.current = null;
-      }
+      pendingTeardownRef.current = setTimeout(() => {
+        pendingTeardownRef.current = null;
+        abortController.abort();
+        const conv = conversationRef.current;
+        if (conv) {
+          conv.endSession().catch(() => {});
+          conversationRef.current = null;
+        }
+        initialisedRef.current = false;
+      }, 30);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

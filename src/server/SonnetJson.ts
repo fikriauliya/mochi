@@ -3,9 +3,9 @@ import { Data, Effect } from "effect";
 import { resolveModelId, useApi } from "./ClaudeBackend";
 
 /**
- * One-shot structured-output calls, shared by Organize / Suggest /
- * Narrator. Two backends behind one entry point — `MOCHI_CLAUDE_BACKEND`
- * picks at runtime.
+ * One-shot structured-output calls, shared by Organize / Suggest. Two
+ * backends behind one entry point — `MOCHI_CLAUDE_BACKEND` picks at
+ * runtime.
  *
  *   cli (default): `claude --print --output-format=json --json-schema=…`
  *     subprocess. No API key, uses claude code login.

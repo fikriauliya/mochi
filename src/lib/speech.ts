@@ -4,9 +4,8 @@ import * as React from "react";
  * STT used to live here as a `useSpeech` hook around ElevenLabs Scribe
  * v2 Realtime — that path was deleted when both create and modify
  * voice intake moved to the Conversational AI agent (`KidPMOverlay`).
- * What remains is the persisted UI language preference shared between
- * the home chip, the agent's per-session language override, and the
- * narrator's output.
+ * What remains is the persisted UI language preference, shared by the
+ * home chip and the agent's per-session language override.
  */
 
 export type SpeechLang = "id-ID" | "en-US";

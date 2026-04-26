@@ -3,7 +3,7 @@
  * sites read this:
  *
  *   1. `SonnetJson.callJsonSchema` — JSON-schema completions used by
- *      Narrator / Suggest / Organize.
+ *      Suggest / Organize.
  *   2. `Vision.scanWorksheet` — image → spec for the worksheet scanner.
  *   3. `Claude.spawn` — the agentic build path.
  *
