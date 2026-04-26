@@ -8,6 +8,15 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { unlockAudio } from "./lib/audio";
+
+// Unlock iOS audio on the very first user gesture so the PM agent's
+// first_message plays immediately on iPad. Without this, the gesture
+// from tapping the mic button "expires" before the SDK's first audio
+// frame arrives and iOS silently mutes playback. See lib/audio.ts.
+if (typeof document !== "undefined") {
+  document.addEventListener("pointerdown", unlockAudio, { once: true });
+}
 
 const elem = document.getElementById("root")!;
 const app = (
