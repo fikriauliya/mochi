@@ -22,6 +22,34 @@ const SSE_HEADERS: Record<string, string> = {
   connection: "keep-alive",
 };
 
+const MANIFEST = {
+  name: "Mochi — Family App Studio",
+  short_name: "Mochi",
+  description: "Ask Mochi to make you an app — the family kitchen for tiny custom apps.",
+  start_url: "/",
+  scope: "/",
+  display: "standalone",
+  orientation: "any",
+  background_color: "#fbf1e1",
+  theme_color: "#fbf1e1",
+  lang: "en",
+  icons: [
+    { src: "/icons/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: "/icons/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+    { src: "/icons/icon-maskable-192.png", sizes: "192x192", type: "image/png", purpose: "maskable" },
+    { src: "/icons/icon-maskable-512.png", sizes: "512x512", type: "image/png", purpose: "maskable" },
+    { src: "/icons/icon.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+  ],
+};
+
+// Tiny no-op service worker. The only reason it exists is to satisfy
+// Chrome's PWA-install heuristic — Mochi is online-only by design (the
+// server is the brain), so caching would just serve stale UI.
+const SW_SOURCE = `self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (e) => e.waitUntil(self.clients.claim()));
+self.addEventListener("fetch", () => {});
+`;
+
 const decodeCreate = S.decodeUnknown(CreateAppRequest);
 
 function shortHex(n = 4): string {
@@ -217,9 +245,52 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
       return serveAppFile(req.params.id, rest || "index.html");
     },
 
+    // ---- PWA: manifest, service worker, icons ----
+    "/manifest.webmanifest": () =>
+      new Response(JSON.stringify(MANIFEST), {
+        headers: {
+          "content-type": "application/manifest+json; charset=utf-8",
+          "cache-control": "public, max-age=300",
+        },
+      }),
+
+    "/sw.js": () =>
+      new Response(SW_SOURCE, {
+        headers: {
+          "content-type": "application/javascript; charset=utf-8",
+          // Browsers cap SW caching at 24h regardless, but say so explicitly.
+          "cache-control": "no-cache",
+          // Required to allow registering a SW served at the root scope.
+          "service-worker-allowed": "/",
+        },
+      }),
+
+    "/icons/:file": (req: Request & { params: { file: string } }) =>
+      serveIcon(req.params.file),
+
     // ---- SPA FALLBACK ----
     "/*": indexHtml,
   };
+}
+
+const ICON_TYPES: Record<string, string> = {
+  png: "image/png",
+  svg: "image/svg+xml",
+};
+
+async function serveIcon(file: string): Promise<Response> {
+  if (file.includes("/") || file.includes("..")) {
+    return new Response("forbidden", { status: 403 });
+  }
+  const ext = file.split(".").pop() ?? "";
+  const type = ICON_TYPES[ext];
+  if (!type) return new Response("not found", { status: 404 });
+  const path = `src/icons/${file}`;
+  const f = Bun.file(path);
+  if (!(await f.exists())) return new Response("not found", { status: 404 });
+  return new Response(f, {
+    headers: { "content-type": type, "cache-control": "public, max-age=86400" },
+  });
 }
 
 async function serveAppFile(id: string, rest: string): Promise<Response> {
