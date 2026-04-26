@@ -583,20 +583,24 @@ function KidMicOverlay({
   onPrompt: (text: string) => void;
   onSwitchToType: (seed?: string) => void;
 }) {
+  // Transcript accumulated across multiple "Add more" recordings. Speech.transcript
+  // is just the *current* recording; we glue them together so the user can
+  // build up a longer prompt one breath at a time.
+  const [accumulated, setAccumulated] = React.useState("");
+  const [phase, setPhase] = React.useState<"listening" | "review">("listening");
+  const accumulatedRef = React.useRef(accumulated);
+  React.useEffect(() => {
+    accumulatedRef.current = accumulated;
+  }, [accumulated]);
+
   const speech = useSpeech({
     lang,
     onFinal: (text) => {
-      speak(
-        intent === "create"
-          ? lang === "id-ID"
-            ? "Sebentar ya, Mochi lagi bikin!"
-            : "Hold on, Mochi is making it!"
-          : lang === "id-ID"
-            ? "Oke, Mochi update ya!"
-            : "Okay, updating it!",
-        lang,
-      );
-      onPrompt(text);
+      const cleaned = text.trim();
+      if (!cleaned) return;
+      const merged = (accumulatedRef.current ? accumulatedRef.current + " " : "") + cleaned;
+      setAccumulated(merged.trim());
+      setPhase("review");
     },
   });
 
@@ -609,9 +613,40 @@ function KidMicOverlay({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  const promptText =
-    speech.transcript ||
-    (intent === "create" ? "I'm listening…" : "What should change?");
+  const live = speech.transcript.trim();
+  const display =
+    phase === "listening"
+      ? [accumulated, live].filter(Boolean).join(" ").trim() ||
+        (intent === "create" ? "I'm listening…" : "What should change?")
+      : accumulated;
+
+  const confirm = () => {
+    if (!accumulated.trim()) return;
+    speak(
+      intent === "create"
+        ? lang === "id-ID"
+          ? "Sebentar ya, Mochi lagi bikin!"
+          : "Hold on, Mochi is making it!"
+        : lang === "id-ID"
+          ? "Oke, Mochi update ya!"
+          : "Okay, updating it!",
+      lang,
+    );
+    onPrompt(accumulated.trim());
+  };
+
+  const addMore = () => {
+    setPhase("listening");
+    speech.start();
+  };
+
+  const startOver = () => {
+    setAccumulated("");
+    setPhase("listening");
+    speech.start();
+  };
+
+  const seedForType = (accumulated + (live ? " " + live : "")).trim() || undefined;
 
   return (
     <div className="fixed inset-0 z-50 bg-cream/95 backdrop-blur-md flex flex-col items-center justify-center p-6">
@@ -621,12 +656,12 @@ function KidMicOverlay({
         className="absolute inset-0 -z-10"
       />
 
-      <Mochi typing size={200} />
+      <Mochi typing={phase === "listening"} happy={phase === "review"} size={200} />
       <h2
         className="font-display text-3xl sm:text-5xl lg:text-6xl 2xl:text-7xl text-ink mt-8 text-center max-w-3xl 2xl:max-w-4xl leading-tight"
         style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
       >
-        {promptText}
+        {display}
       </h2>
 
       {speech.state === "denied" && (
@@ -635,11 +670,60 @@ function KidMicOverlay({
         </p>
       )}
 
+      {phase === "review" && (
+        <div className="mt-8 flex flex-col items-center gap-3 w-full max-w-xl 2xl:max-w-2xl">
+          <button
+            onClick={confirm}
+            autoFocus
+            className="
+              w-full inline-flex items-center justify-center gap-2
+              min-h-14 2xl:min-h-16 px-6 rounded-full
+              bg-mochi-deep text-paper font-bold text-lg 2xl:text-2xl
+              shadow-[0_8px_20px_-8px_rgba(224,114,107,0.7)]
+              hover:scale-[1.02] active:scale-95 transition-transform
+              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+            "
+          >
+            <Sparkles className="size-5 2xl:size-6" />
+            {intent === "create" ? "Build it!" : "Update it!"}
+          </button>
+
+          <div className="flex flex-wrap items-center justify-center gap-3 w-full">
+            <button
+              onClick={addMore}
+              className="
+                inline-flex items-center gap-2
+                min-h-12 px-5 2xl:px-6 rounded-full
+                bg-paper border border-line text-ink font-semibold
+                hover:bg-cream-deep transition-colors
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+              "
+            >
+              <Mic className="size-4" />
+              Add more
+            </button>
+            <button
+              onClick={startOver}
+              className="
+                inline-flex items-center gap-2
+                min-h-12 px-5 2xl:px-6 rounded-full
+                bg-paper border border-line text-ink-soft
+                hover:bg-cream-deep transition-colors
+                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
+              "
+            >
+              <RefreshCcw className="size-4" />
+              Start over
+            </button>
+          </div>
+        </div>
+      )}
+
       <div className="mt-10 flex items-center gap-3">
         <button
           onClick={() => {
             speech.stop();
-            onSwitchToType(speech.transcript || undefined);
+            onSwitchToType(seedForType);
           }}
           className="
             inline-flex items-center gap-2 px-4 py-3 2xl:px-5 2xl:py-3.5 rounded-full
