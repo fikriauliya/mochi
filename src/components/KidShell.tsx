@@ -21,7 +21,6 @@ import { KidPMOverlay } from "./KidPMOverlay";
 import {
   SPEECH_LANG_LABELS,
   type SpeechLang,
-  useSpeech,
   useSpeechLang,
 } from "@/lib/speech";
 import { speak, cancelSpeech } from "@/lib/tts";
@@ -354,52 +353,36 @@ function KidHome(props: {
         </div>
       )}
 
-      {composer.kind === "voice" && composer.intent === "create" && (
-        // Create flow: hand off to the Conversational AI agent (Mochi PM)
-        // which gathers requirements over voice and submits a complete
-        // English spec via the submit_requirements client tool.
+      {composer.kind === "voice" && (
+        // Both create and modify hand off to the Conversational AI
+        // agent (Mochi PM). For modify, the agent gets the existing
+        // app's name + description as dynamic variables so it can ask
+        // a focused 1-2 question follow-up ("what should I change?").
         <KidPMOverlay
           lang={lang}
-          outputKind={composer.outputKind ?? "app"}
+          intent={composer.intent}
+          outputKind={
+            composer.outputKind ?? composer.app?.kind ?? "app"
+          }
+          {...(composer.app !== undefined
+            ? { existingApp: composer.app }
+            : {})}
           onClose={() => setComposer({ kind: "idle" })}
           onSwitchToType={() => {
             const c = composer;
             setComposer({
               kind: "text",
               intent: c.intent,
-              ...(c.outputKind !== undefined ? { outputKind: c.outputKind } : {}),
-            });
-          }}
-          onPrompt={(prompt) => {
-            const c = composer;
-            setComposer({ kind: "idle" });
-            onCreate(prompt, c.outputKind ?? "app", lang);
-          }}
-        />
-      )}
-
-      {composer.kind === "voice" && composer.intent === "modify" && (
-        // Modify keeps the simple one-shot mic — tweaks like "make it
-        // purple" don't need a PM session.
-        <KidMicOverlay
-          lang={lang}
-          intent={composer.intent}
-          outputKind={composer.outputKind ?? "app"}
-          onClose={() => setComposer({ kind: "idle" })}
-          onSwitchToType={(seed) => {
-            const c = composer;
-            setComposer({
-              kind: "text",
-              intent: c.intent,
               ...(c.app !== undefined ? { app: c.app } : {}),
               ...(c.outputKind !== undefined ? { outputKind: c.outputKind } : {}),
-              ...(seed !== undefined ? { seed } : {}),
             });
           }}
           onPrompt={(prompt) => {
             const c = composer;
             setComposer({ kind: "idle" });
-            if (c.app) onModify(c.app.id, prompt, lang);
+            if (c.intent === "create")
+              onCreate(prompt, c.outputKind ?? "app", lang);
+            else if (c.app) onModify(c.app.id, prompt, lang);
           }}
         />
       )}
@@ -808,34 +791,6 @@ function KidAppMenu(props: {
 
 /* ------------- composer copy: keep all the intent×kind×lang strings ------------- */
 
-function listeningPlaceholder(
-  intent: "create" | "modify",
-  outputKind: AppKind,
-): string {
-  if (intent === "modify") return "What should change?";
-  return outputKind === "printable"
-    ? "What should I make to print?"
-    : "I'm listening…";
-}
-
-function confirmUtterance(
-  intent: "create" | "modify",
-  outputKind: AppKind,
-  lang: SpeechLang,
-): string {
-  if (intent === "modify") {
-    return lang === "id-ID" ? "Oke, Mochi update ya!" : "Okay, updating it!";
-  }
-  if (outputKind === "printable") {
-    return lang === "id-ID"
-      ? "Sebentar ya, Mochi lagi gambar!"
-      : "Hold on, Mochi is sketching!";
-  }
-  return lang === "id-ID"
-    ? "Sebentar ya, Mochi lagi bikin!"
-    : "Hold on, Mochi is making it!";
-}
-
 function confirmLabel(
   intent: "create" | "modify",
   outputKind: AppKind,
@@ -866,186 +821,6 @@ function typeOverlayPlaceholder(
   return outputKind === "printable"
     ? "e.g. a chore chart with stickers, a multiplication table"
     : "e.g. a flashcard quiz about animals";
-}
-
-/* ----------------------------- Mic overlay ----------------------------- */
-
-function KidMicOverlay({
-  lang,
-  intent,
-  outputKind = "app",
-  onClose,
-  onPrompt,
-  onSwitchToType,
-}: {
-  lang: SpeechLang;
-  intent: "create" | "modify";
-  outputKind?: AppKind;
-  onClose: () => void;
-  onPrompt: (text: string) => void;
-  onSwitchToType: (seed?: string) => void;
-}) {
-  // Transcript accumulated across multiple "Add more" recordings. Speech.transcript
-  // is just the *current* recording; we glue them together so the user can
-  // build up a longer prompt one breath at a time.
-  const [accumulated, setAccumulated] = React.useState("");
-  const [phase, setPhase] = React.useState<"listening" | "review">("listening");
-  const accumulatedRef = React.useRef(accumulated);
-  React.useEffect(() => {
-    accumulatedRef.current = accumulated;
-  }, [accumulated]);
-
-  const speech = useSpeech({
-    lang,
-    onFinal: (text) => {
-      const cleaned = text.trim();
-      if (!cleaned) return;
-      const merged = (accumulatedRef.current ? accumulatedRef.current + " " : "") + cleaned;
-      setAccumulated(merged.trim());
-      setPhase("review");
-    },
-  });
-
-  React.useEffect(() => {
-    speech.start();
-    return () => {
-      speech.stop();
-      cancelSpeech();
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const live = speech.transcript.trim();
-  const display =
-    phase === "review"
-      ? accumulated
-      : [accumulated, live].filter(Boolean).join(" ").trim() ||
-        listeningPlaceholder(intent, outputKind);
-
-  const confirm = () => {
-    if (!accumulated.trim()) return;
-    speak(confirmUtterance(intent, outputKind, lang), lang);
-    onPrompt(accumulated.trim());
-  };
-
-  const addMore = () => {
-    setPhase("listening");
-    speech.start();
-  };
-
-  const startOver = () => {
-    setAccumulated("");
-    setPhase("listening");
-    speech.start();
-  };
-
-  const seedForType = (accumulated + (live ? " " + live : "")).trim() || undefined;
-
-  return (
-    <div className="fixed inset-0 z-50 bg-cream/95 backdrop-blur-md flex flex-col items-center justify-center p-6">
-      <button
-        onClick={onClose}
-        aria-label="Cancel"
-        className="absolute inset-0 -z-10"
-      />
-
-      <Mochi typing={phase === "listening"} happy={phase === "review"} size={200} />
-      <h2
-        className="font-display text-3xl sm:text-5xl lg:text-6xl 2xl:text-7xl text-ink mt-8 text-center max-w-3xl 2xl:max-w-4xl leading-tight"
-        style={{ fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 500' }}
-      >
-        {display}
-      </h2>
-
-      {speech.state === "denied" && (
-        <p className="text-mom italic mt-6 text-base 2xl:text-lg">
-          Mic blocked — ask a grown-up for help.
-        </p>
-      )}
-
-      {phase === "review" && (
-        <div className="mt-8 flex flex-col items-center gap-3 w-full max-w-xl 2xl:max-w-2xl">
-          <button
-            onClick={confirm}
-            autoFocus
-            className="
-              w-full inline-flex items-center justify-center gap-2
-              min-h-14 2xl:min-h-16 px-6 rounded-full
-              bg-mochi-deep text-paper font-bold text-lg 2xl:text-2xl
-              shadow-[0_8px_20px_-8px_rgba(224,114,107,0.7)]
-              hover:scale-[1.02] active:scale-95 transition-transform
-              focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-            "
-          >
-            {outputKind === "printable" ? (
-              <Printer className="size-5 2xl:size-6" />
-            ) : (
-              <Sparkles className="size-5 2xl:size-6" />
-            )}
-            {confirmLabel(intent, outputKind)}
-          </button>
-
-          <div className="flex flex-wrap items-center justify-center gap-3 w-full">
-            <button
-              onClick={addMore}
-              className="
-                inline-flex items-center gap-2
-                min-h-12 px-5 2xl:px-6 rounded-full
-                bg-paper border border-line text-ink font-semibold
-                hover:bg-cream-deep transition-colors
-                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-              "
-            >
-              <Mic className="size-4" />
-              Add more
-            </button>
-            <button
-              onClick={startOver}
-              className="
-                inline-flex items-center gap-2
-                min-h-12 px-5 2xl:px-6 rounded-full
-                bg-paper border border-line text-ink-soft
-                hover:bg-cream-deep transition-colors
-                focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-              "
-            >
-              <RefreshCcw className="size-4" />
-              Start over
-            </button>
-          </div>
-        </div>
-      )}
-
-      <div className="mt-10 flex items-center gap-3">
-        <button
-          onClick={() => {
-            speech.stop();
-            onSwitchToType(seedForType);
-          }}
-          className="
-            inline-flex items-center gap-2 px-4 py-3 2xl:px-5 2xl:py-3.5 rounded-full
-            bg-paper border border-line text-ink-soft hover:bg-cream-deep
-            transition-colors text-[0.88rem] 2xl:text-base
-            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-          "
-        >
-          <Keyboard className="size-4" /> Type instead
-        </button>
-        <button
-          onClick={onClose}
-          className="
-            inline-flex items-center justify-center
-            size-12 2xl:size-14 rounded-full bg-paper border border-line text-ink-soft
-            hover:bg-cream-deep transition-colors
-            focus:outline-none focus-visible:ring-4 focus-visible:ring-mochi-soft
-          "
-          aria-label="Cancel"
-        >
-          <X className="size-5" />
-        </button>
-      </div>
-    </div>
-  );
 }
 
 /* ---------------------------- Type overlay ---------------------------- */
@@ -1514,12 +1289,14 @@ function KidOpenView({
       />
 
       {composer.kind === "voice" && (
-        <KidMicOverlay
+        <KidPMOverlay
           lang={lang}
           intent="modify"
+          outputKind={app.kind}
+          existingApp={app}
           onClose={() => setComposer({ kind: "idle" })}
-          onSwitchToType={(seed) =>
-            setComposer({ kind: "text", ...(seed !== undefined ? { seed } : {}) })
+          onSwitchToType={() =>
+            setComposer({ kind: "text" })
           }
           onPrompt={(prompt) => {
             setComposer({ kind: "idle" });

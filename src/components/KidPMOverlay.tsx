@@ -7,22 +7,23 @@ import {
 } from "@elevenlabs/client";
 import { Mochi } from "./Mochi";
 import { getAgentSignedUrl } from "@/lib/api";
-import type { AppKind } from "@/lib/types";
+import type { App, AppKind } from "@/lib/types";
 import type { SpeechLang } from "@/lib/speech";
 
 /**
  * Voice-only requirement gathering. Hands the kid off to a Conversational
- * AI agent ("Mochi PM") that asks 2-4 short questions and submits the
- * spec via a `submit_requirements` client tool. The browser opens the
- * agent's WebSocket directly using a server-minted signed URL — keeps
- * the API key off the client.
+ * AI agent ("Mochi PM") that asks short questions and submits the spec
+ * via a `submit_requirements` client tool. The browser opens the agent's
+ * WebSocket directly using a server-minted signed URL — keeps the API
+ * key off the client.
  *
- * Hook contract is the same as the create-mode KidMicOverlay it
- * replaces: `onPrompt(spec)` fires once with the final English spec,
- * after which the parent kicks off the build via /api/apps.
+ * Used for both create (2-4 questions) and modify (1-2 questions). The
+ * agent branches on `intent` via dynamic variables; the firstMessage
+ * override greets create with "what should we make?" and modify with
+ * "what should I change about <name>?".
  *
- * Cancel / mic-denied / signed-url failure all fall through to the
- * type fallback so the demo never gets stuck.
+ * Cancel / mic-denied / signed-url failure all fall through to the type
+ * fallback so the demo never gets stuck.
  */
 
 type Phase = "connecting" | "talking" | "submitting" | "error";
@@ -31,13 +32,18 @@ type LatestMessage = { role: Role; text: string };
 
 export function KidPMOverlay({
   lang,
+  intent,
   outputKind,
+  existingApp,
   onClose,
   onPrompt,
   onSwitchToType,
 }: {
   lang: SpeechLang;
+  intent: "create" | "modify";
   outputKind: AppKind;
+  /** Required when intent==="modify"; ignored for create. */
+  existingApp?: App;
   onClose: () => void;
   onPrompt: (spec: string) => void;
   onSwitchToType: () => void;
@@ -69,15 +75,26 @@ export function KidPMOverlay({
       if (!alive) return;
 
       try {
+        const firstMessage =
+          intent === "modify" && existingApp
+            ? `Hi! What should I change about ${existingApp.name}?`
+            : "Hi! It's Mochi! What should we make for you today?";
+
         const conv = await Conversation.startSession({
           signedUrl,
-          dynamicVariables: { output_kind: outputKind },
-          // Per-session language hint so the agent's ASR/TTS speak
-          // whatever the kid set on the home chip. Only honoured if the
-          // agent is configured multilingual; ignored otherwise.
+          dynamicVariables: {
+            intent,
+            output_kind: outputKind,
+            existing_name: existingApp?.name ?? "",
+            existing_description: existingApp?.description ?? "",
+          },
+          // Per-session overrides: language hint (multilingual agents
+          // only) and a context-aware first message so we don't need a
+          // separate agent for modify.
           overrides: {
             agent: {
               language: lang === "id-ID" ? "id" : "en",
+              firstMessage,
             },
           },
           clientTools: {
@@ -149,13 +166,20 @@ export function KidPMOverlay({
 
   const headline = (() => {
     if (phase === "connecting") return "Hi! It's Mochi…";
-    if (phase === "submitting") return "Awesome, making it now!";
+    if (phase === "submitting") {
+      return intent === "modify"
+        ? "Got it, fixing it now!"
+        : "Awesome, making it now!";
+    }
     if (phase === "error") {
       return lang === "id-ID"
         ? "Aduh, ada masalah."
         : "Oh no, something went wrong.";
     }
     if (latest) return latest.text;
+    if (intent === "modify" && existingApp) {
+      return `What should I change about ${existingApp.name}?`;
+    }
     return outputKind === "printable"
       ? "Tell me what to print…"
       : "Tell me what to make…";
