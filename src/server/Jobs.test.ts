@@ -32,11 +32,13 @@ const StubPrintableLive = Layer.succeed(
   }),
 );
 
-// Organize never spawns claude in tests — return the input order unchanged.
+// Organize never spawns claude in tests — return the input as one group
+// so the per-id position assignment is exercised but no subprocess fires.
 const StubOrganizeLive = Layer.succeed(
   OrganizeService,
   OrganizeService.of({
-    organize: (apps) => Effect.succeed(apps.map((a) => a.id)),
+    organize: (apps) =>
+      Effect.succeed([{ name: "", appIds: apps.map((a) => a.id) }]),
   }),
 );
 
@@ -218,6 +220,7 @@ const seedApp = (id: string): App => ({
   prompt: "make a counter",
   status: "building",
   favorite: false,
+  category: "",
   position: 0,
   createdAt: Date.now(),
   updatedAt: Date.now(),

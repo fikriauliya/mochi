@@ -168,15 +168,36 @@ function KidHome(props: {
   const [composer, setComposer] = React.useState<Composer>({ kind: "idle" });
   const [menuApp, setMenuApp] = React.useState<App | null>(null);
 
-  // Favorites pinned to the top; within each tier, the organize service's
-  // `position` (lower = earlier) drives order, with updatedAt as a tiebreak
-  // for fresh builds and for groups the model didn't reorder.
-  const sorted = [...apps].sort((a, b) => {
-    if (a.favorite !== b.favorite) return a.favorite ? -1 : 1;
-    if (a.position !== b.position) return a.position - b.position;
-    return b.updatedAt - a.updatedAt;
-  });
-  const hasApps = sorted.length > 0;
+  // Group the home grid: a single "★ Favorites" section pinned at the
+  // top (regardless of category), then one section per organize-assigned
+  // category. Apps without a category fall into "Other". Section order
+  // follows the smallest `position` seen within each category, so
+  // sonnet's intended layout still wins.
+  const grouped = React.useMemo(() => {
+    if (apps.length === 0) return [] as Array<{ name: string; apps: App[] }>;
+    const sorted = [...apps].sort((a, b) => {
+      if (a.position !== b.position) return a.position - b.position;
+      return b.updatedAt - a.updatedAt;
+    });
+    const favorites = sorted.filter((a) => a.favorite);
+    const rest = sorted.filter((a) => !a.favorite);
+    const byCategory = new Map<string, App[]>();
+    for (const a of rest) {
+      const key = a.category || "Other";
+      const list = byCategory.get(key);
+      if (list) list.push(a);
+      else byCategory.set(key, [a]);
+    }
+    const out: Array<{ name: string; apps: App[] }> = [];
+    if (favorites.length > 0) {
+      out.push({ name: "★ Favorites", apps: favorites });
+    }
+    for (const [name, list] of byCategory) {
+      out.push({ name, apps: list });
+    }
+    return out;
+  }, [apps]);
+  const hasApps = apps.length > 0;
 
   const openVoice = (outputKind?: AppKind) =>
     setComposer({
@@ -225,14 +246,28 @@ function KidHome(props: {
                 ))}
               </div>
             )}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 2xl:gap-4 max-w-7xl mx-auto">
-              {sorted.map((app) => (
-                <KidAppTile
-                  key={app.id}
-                  app={app}
-                  onOpen={onOpenApp}
-                  onMenu={() => setMenuApp(app)}
-                />
+            <div className="max-w-7xl mx-auto space-y-5 2xl:space-y-7">
+              {grouped.map((group) => (
+                <section key={group.name}>
+                  <h2
+                    className="font-display text-base sm:text-lg 2xl:text-xl text-ink-soft mb-2 2xl:mb-3 px-1"
+                    style={{
+                      fontVariationSettings: '"SOFT" 100, "WONK" 1, "wght" 600',
+                    }}
+                  >
+                    {group.name}
+                  </h2>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-3 2xl:gap-4">
+                    {group.apps.map((app) => (
+                      <KidAppTile
+                        key={app.id}
+                        app={app}
+                        onOpen={onOpenApp}
+                        onMenu={() => setMenuApp(app)}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
           </div>

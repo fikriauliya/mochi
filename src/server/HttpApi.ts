@@ -173,6 +173,7 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
                 prompt: parsed.prompt,
                 status: "building",
                 favorite: false,
+                category: "",
                 position: 0,
                 createdAt: now,
                 updatedAt: now,
@@ -182,6 +183,26 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
               const jobs = yield* JobsService;
               yield* jobs.start(id, "create", parsed.prompt);
               return okJson(app, 201);
+            }),
+          ),
+        ),
+    },
+
+    // ---- MANUAL REORGANIZE ----
+    // Triggers the same sonnet-driven categorization that runs after a
+    // build. Useful for legacy registries (where every row was created
+    // before organize existed) and for re-running on demand.
+    "/api/apps/reorganize": {
+      POST: () =>
+        runP(
+          handle(
+            Effect.gen(function* () {
+              const jobs = yield* JobsService;
+              yield* jobs.reorganize();
+              suggestCache = null;
+              const reg = yield* RegistryService;
+              const apps = yield* reg.list;
+              return okJson({ count: apps.length });
             }),
           ),
         ),

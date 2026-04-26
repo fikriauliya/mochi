@@ -2,18 +2,19 @@ import { Context, Data, Effect, Layer } from "effect";
 import type { AppKind } from "./Schema";
 
 /**
- * After a successful build, the home grid would otherwise drift into
- * recency-only order. OrganizeService asks claude-sonnet (low effort,
- * no tools, no MCP) to return a sensible display order — kid games near
- * each other, calculators near each other, printables next to their
- * related apps. The returned array is persisted as `position` per row.
+ * After every successful build, ask claude-sonnet to bucket the family's
+ * apps + printables into a small set of categories ("Kid Games", "Daily
+ * Routines", "Calculators", etc) and order them within each bucket. The
+ * result is persisted as `category` + `position` per row in SQLite, and
+ * the home grid renders one section per category.
  *
  * The call is fire-and-forget from `Jobs.ts` so a slow organize never
- * blocks the build's `done` event. Failures are logged and ignored —
- * the worst case is the grid stays in its current order.
+ * blocks the build's `done` event. Failures are swallowed in this
+ * service; on any error the input is returned as a single "" group so
+ * the caller can still persist a sane state.
  *
- * Cost is tiny (~50-100 input tokens × #apps, ~500 output tokens) so
- * running on every build is fine.
+ * Cost is small (~50-100 input tokens × #apps, ~600 output) so running
+ * on every build is fine.
  */
 
 export class OrganizeError extends Data.TaggedError("OrganizeError")<{
@@ -29,38 +30,65 @@ export type OrganizeInput = ReadonlyArray<{
   readonly kind: AppKind;
 }>;
 
+export type OrganizeGroup = {
+  readonly name: string;
+  readonly appIds: ReadonlyArray<string>;
+};
+
 export class OrganizeService extends Context.Tag("OrganizeService")<
   OrganizeService,
   {
     /**
-     * Returns the input apps' ids in a recommended display order. On any
-     * error returns the input order unchanged (never throws to the caller).
+     * Returns the input apps grouped into categories, with each group's
+     * appIds in display order. Every input id appears exactly once.
+     * Never fails: on any error the input is returned as one empty-named
+     * group ("") in original order.
      */
     readonly organize: (
       apps: OrganizeInput,
-    ) => Effect.Effect<ReadonlyArray<string>, never>;
+    ) => Effect.Effect<ReadonlyArray<OrganizeGroup>, never>;
   }
 >() {}
 
 const RESPONSE_SCHEMA = JSON.stringify({
   type: "object",
   properties: {
-    order: {
+    groups: {
       type: "array",
-      items: { type: "string" },
+      minItems: 1,
+      items: {
+        type: "object",
+        properties: {
+          name: { type: "string" },
+          appIds: {
+            type: "array",
+            items: { type: "string" },
+            minItems: 1,
+          },
+        },
+        required: ["name", "appIds"],
+        additionalProperties: false,
+      },
     },
   },
-  required: ["order"],
+  required: ["groups"],
   additionalProperties: false,
 });
 
 const ORGANIZE_SYSTEM_PROMPT = `You organize a family app launcher's home screen.
+
 Given a list of small web apps and printable infographics the family has built,
-return the ids in a sensible display order:
-- Most likely useful first.
-- Group related apps together (all calculators, all kid games, all daily routines).
+return them grouped into 2-5 short, family-friendly category names ("Kid Games",
+"Daily Routines", "Calculators", "Health & Body", "Recipes", etc).
+
+Rules:
+- Use Title Case category names; ≤24 chars each.
+- Most-likely-to-tap categories first.
+- Within each group, order by likely usefulness (bigger / broader first).
 - Place each printable next to the apps it most relates to.
-Respond ONLY with JSON matching the schema. Include every id exactly once.`;
+- Every id appears in exactly one group.
+
+Respond ONLY with JSON matching the schema.`;
 
 function buildPrompt(apps: OrganizeInput): string {
   const list = apps
@@ -72,15 +100,27 @@ function buildPrompt(apps: OrganizeInput): string {
   return `${ORGANIZE_SYSTEM_PROMPT}\n\nApps:\n${list}`;
 }
 
-function extractOrder(parsed: unknown): ReadonlyArray<string> | null {
+type RawGroup = { name?: unknown; appIds?: unknown };
+
+function extractGroups(parsed: unknown): ReadonlyArray<OrganizeGroup> | null {
   if (!parsed || typeof parsed !== "object") return null;
-  // claude --output-format=json wraps in { result: <json-schema-validated> }
-  // when --json-schema is supplied. Be defensive about both shapes.
-  const candidates = [parsed, (parsed as { result?: unknown }).result];
+  // claude --json-schema lands the validated payload at `.structured_output`;
+  // older versions wrapped it under `.result`. Be defensive about both, plus
+  // the bare top-level shape.
+  const p = parsed as Record<string, unknown>;
+  const candidates = [p["structured_output"], p["result"], parsed];
   for (const c of candidates) {
-    if (c && typeof c === "object" && "order" in c) {
-      const order = (c as { order: unknown }).order;
-      if (Array.isArray(order)) return order.filter((x): x is string => typeof x === "string");
+    if (c && typeof c === "object" && Array.isArray((c as { groups?: unknown }).groups)) {
+      const raw = (c as { groups: ReadonlyArray<RawGroup> }).groups;
+      const groups: OrganizeGroup[] = [];
+      for (const g of raw) {
+        if (typeof g.name !== "string") continue;
+        if (!Array.isArray(g.appIds)) continue;
+        const ids = g.appIds.filter((x): x is string => typeof x === "string");
+        if (ids.length === 0) continue;
+        groups.push({ name: g.name.slice(0, 40), appIds: ids });
+      }
+      if (groups.length > 0) return groups;
     }
   }
   return null;
@@ -101,6 +141,11 @@ async function callClaude(prompt: string): Promise<string> {
       RESPONSE_SCHEMA,
       "--permission-mode",
       "bypassPermissions",
+      // `--tools` is variadic — must be followed by a non-variadic flag to
+      // stop it slurping subsequent args. We put the empty value here and
+      // let `--strict-mcp-config` (a boolean flag) terminate the list.
+      "--tools",
+      "",
       "--strict-mcp-config",
       "--mcp-config",
       '{"mcpServers":{}}',
@@ -108,8 +153,6 @@ async function callClaude(prompt: string): Promise<string> {
       "--setting-sources",
       "",
       "--exclude-dynamic-system-prompt-sections",
-      "--tools",
-      "",
       prompt,
     ],
     { stdout: "pipe", stderr: "pipe" },
@@ -123,12 +166,16 @@ async function callClaude(prompt: string): Promise<string> {
   return stdout;
 }
 
+const fallback = (apps: OrganizeInput): ReadonlyArray<OrganizeGroup> => [
+  { name: "", appIds: apps.map((a) => a.id) },
+];
+
 export const OrganizeLive = Layer.succeed(
   OrganizeService,
   OrganizeService.of({
     organize: (apps) =>
       Effect.gen(function* () {
-        if (apps.length < 2) return apps.map((a) => a.id);
+        if (apps.length < 2) return fallback(apps);
 
         const t0 = Date.now();
         const stdout = yield* Effect.tryPromise({
@@ -154,39 +201,44 @@ export const OrganizeLive = Layer.succeed(
               cause,
             }),
         });
-        const order = extractOrder(parsed);
-        if (!order) {
+        const raw = extractGroups(parsed);
+        if (!raw) {
           return yield* Effect.fail(
             new OrganizeError({
-              message: "organize: response missing 'order' array",
+              message: "organize: response missing 'groups' array",
             }),
           );
         }
 
-        // Filter to known ids, dedupe, then append any apps the model
-        // dropped — this guarantees every input id appears exactly once.
+        // Filter to known ids, dedupe across groups, then append any
+        // dropped apps to a final "Other" group so every id is represented.
         const knownIds = new Set(apps.map((a) => a.id));
         const seen = new Set<string>();
-        const result: string[] = [];
-        for (const id of order) {
-          if (knownIds.has(id) && !seen.has(id)) {
-            result.push(id);
-            seen.add(id);
+        const finalGroups: OrganizeGroup[] = [];
+        for (const g of raw) {
+          const ids: string[] = [];
+          for (const id of g.appIds) {
+            if (knownIds.has(id) && !seen.has(id)) {
+              ids.push(id);
+              seen.add(id);
+            }
           }
+          if (ids.length > 0) finalGroups.push({ name: g.name, appIds: ids });
         }
-        for (const a of apps) {
-          if (!seen.has(a.id)) result.push(a.id);
+        const missing = apps.filter((a) => !seen.has(a.id)).map((a) => a.id);
+        if (missing.length > 0) {
+          finalGroups.push({ name: "Other", appIds: missing });
         }
+
         yield* Effect.log(
-          `[organize] ${apps.length} apps → ordered in ${Date.now() - t0}ms`,
+          `[organize] ${apps.length} apps → ${finalGroups.length} groups in ${Date.now() - t0}ms`,
         );
-        return result;
+        return finalGroups;
       }).pipe(
-        // Failures fall back to input order; never propagate to the caller.
         Effect.catchAll((cause) =>
           Effect.gen(function* () {
             yield* Effect.logWarning(`[organize] failed: ${cause.message}`);
-            return apps.map((a) => a.id);
+            return fallback(apps);
           }),
         ),
       ),

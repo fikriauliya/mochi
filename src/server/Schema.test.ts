@@ -33,6 +33,7 @@ describe("App", () => {
     prompt: "make x",
     status: "ready",
     favorite: false,
+    category: "",
     position: 0,
     createdAt: 1,
     updatedAt: 2,

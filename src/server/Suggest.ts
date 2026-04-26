@@ -83,7 +83,9 @@ function buildPrompt(apps: SuggestInput): string {
 
 function extractSuggestions(parsed: unknown): ReadonlyArray<string> | null {
   if (!parsed || typeof parsed !== "object") return null;
-  const candidates = [parsed, (parsed as { result?: unknown }).result];
+  // claude --json-schema lands the validated payload at `.structured_output`.
+  const p = parsed as Record<string, unknown>;
+  const candidates = [p["structured_output"], p["result"], parsed];
   for (const c of candidates) {
     if (c && typeof c === "object" && "suggestions" in c) {
       const s = (c as { suggestions: unknown }).suggestions;
@@ -109,6 +111,11 @@ async function callClaude(prompt: string): Promise<string> {
       RESPONSE_SCHEMA,
       "--permission-mode",
       "bypassPermissions",
+      // `--tools` is variadic; the empty value here is "no built-in tools",
+      // and `--strict-mcp-config` (boolean) terminates the variadic so the
+      // prompt at the end stays a positional arg.
+      "--tools",
+      "",
       "--strict-mcp-config",
       "--mcp-config",
       '{"mcpServers":{}}',
@@ -116,8 +123,6 @@ async function callClaude(prompt: string): Promise<string> {
       "--setting-sources",
       "",
       "--exclude-dynamic-system-prompt-sections",
-      "--tools",
-      "",
       prompt,
     ],
     { stdout: "pipe", stderr: "pipe" },

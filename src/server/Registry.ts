@@ -40,6 +40,7 @@ const SCHEMA = `
     prompt      TEXT NOT NULL,
     status      TEXT NOT NULL,
     favorite    INTEGER NOT NULL DEFAULT 0,
+    category    TEXT NOT NULL DEFAULT '',
     position    INTEGER NOT NULL DEFAULT 0,
     created_at  INTEGER NOT NULL,
     updated_at  INTEGER NOT NULL,
@@ -64,6 +65,7 @@ function migrateColumns(db: Database): void {
     ["kind", "TEXT NOT NULL DEFAULT 'app'"],
     ["favorite", "INTEGER NOT NULL DEFAULT 0"],
     ["position", "INTEGER NOT NULL DEFAULT 0"],
+    ["category", "TEXT NOT NULL DEFAULT ''"],
   ];
   for (const [name, defn] of additions) {
     if (!cols.has(name)) {
@@ -82,6 +84,7 @@ type Row = {
   prompt: string;
   status: string;
   favorite: number;
+  category: string;
   position: number;
   created_at: number;
   updated_at: number;
@@ -98,6 +101,7 @@ const rowToApp = (row: Row): App => ({
   prompt: row.prompt,
   status: row.status as AppStatus,
   favorite: row.favorite === 1,
+  category: row.category ?? "",
   position: row.position,
   createdAt: row.created_at,
   updatedAt: row.updated_at,
@@ -162,6 +166,7 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
         string,
         string,
         number,
+        string,
         number,
         number,
         number,
@@ -170,8 +175,8 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
     >(`
       INSERT INTO apps (
         id, session_id, kind, name, emoji, description,
-        prompt, status, favorite, position, created_at, updated_at, last_error
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        prompt, status, favorite, category, position, created_at, updated_at, last_error
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
         session_id  = excluded.session_id,
         kind        = excluded.kind,
@@ -181,6 +186,7 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
         prompt      = excluded.prompt,
         status      = excluded.status,
         favorite    = excluded.favorite,
+        category    = excluded.category,
         position    = excluded.position,
         updated_at  = excluded.updated_at,
         last_error  = excluded.last_error
@@ -201,6 +207,7 @@ export const makeRegistryLive = (dbPath: string) => Layer.scoped(
           app.prompt,
           app.status,
           app.favorite ? 1 : 0,
+          app.category,
           app.position,
           app.createdAt,
           app.updatedAt,

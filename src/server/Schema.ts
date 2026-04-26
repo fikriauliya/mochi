@@ -21,7 +21,13 @@ export const App = S.Struct({
   prompt: S.String,
   status: AppStatus,
   favorite: S.Boolean,
-  /** Lower = earlier on the home grid. Set by the organize service after each build. */
+  /**
+   * Category label assigned by the organize service ("Kid Games",
+   * "Daily Routines", etc). Empty until the first organize run; the
+   * frontend treats empty as "Other".
+   */
+  category: S.String,
+  /** Lower = earlier within its category on the home grid. */
   position: S.Number,
   createdAt: S.Number,
   updatedAt: S.Number,

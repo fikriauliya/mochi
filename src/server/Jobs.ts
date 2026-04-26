@@ -45,6 +45,12 @@ export class JobsService extends Context.Tag("JobsService")<
       prompt: string,
     ) => Effect.Effect<void, JobAlreadyRunning | AppNotFound | RegistryError>;
     readonly subscribe: (id: string) => Stream.Stream<BuildEvent>;
+    /**
+     * Run the organize step out-of-band (no build required). Used both by
+     * a manual `POST /api/apps/reorganize` and during one-off catch-up
+     * for legacy registries that pre-date organize.
+     */
+    readonly reorganize: () => Effect.Effect<void>;
   }
 >() {}
 
@@ -189,17 +195,17 @@ export const JobsLive = Layer.effect(
     const jobs = yield* Ref.make<ReadonlyMap<string, ActiveJob>>(new Map());
 
     /**
-     * After a successful build, ask claude-sonnet to reshuffle the home
-     * grid into a sensible order, then write each app's `position`. Runs
-     * as a daemon — never blocks the build's `done` event. All errors
-     * are swallowed in OrganizeService; this just persists whatever order
-     * comes back.
+     * After a successful build, ask claude-sonnet to bucket the home
+     * grid into category groups, then persist `category` + within-group
+     * `position` per app. Runs as a daemon — never blocks the build's
+     * `done` event. All errors are swallowed in OrganizeService; this
+     * just persists whatever the model produced.
      */
     const scheduleReorganize = Effect.gen(function* () {
       const allApps = yield* registry.list;
       const ready = allApps.filter((a) => a.status === "ready");
       if (ready.length < 2) return;
-      const order = yield* organizer.organize(
+      const groups = yield* organizer.organize(
         ready.map((a) => ({
           id: a.id,
           name: a.name,
@@ -208,9 +214,22 @@ export const JobsLive = Layer.effect(
           kind: a.kind,
         })),
       );
+      // Flatten groups into a list of patches: each app gets its
+      // category name plus a global ordering index so the home grid can
+      // sort by [favorite, position] without needing a per-group sort.
+      const patches: Array<{ id: string; category: string; position: number }> = [];
+      let pos = 0;
+      for (const group of groups) {
+        for (const id of group.appIds) {
+          patches.push({ id, category: group.name, position: pos++ });
+        }
+      }
       yield* Effect.forEach(
-        order,
-        (id, i) => registry.patch(id, { position: i }).pipe(Effect.ignore),
+        patches,
+        (p) =>
+          registry
+            .patch(p.id, { category: p.category, position: p.position })
+            .pipe(Effect.ignore),
         { concurrency: 4, discard: true },
       );
     }).pipe(
@@ -592,6 +611,7 @@ export const JobsLive = Layer.effect(
             return Stream.succeed(terminal) as Stream.Stream<BuildEvent>;
           }),
         ),
+      reorganize: () => scheduleReorganize,
     });
   }),
 );

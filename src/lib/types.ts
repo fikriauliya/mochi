@@ -12,7 +12,9 @@ export type App = {
   prompt: string;
   status: AppStatus;
   favorite: boolean;
-  /** Lower = earlier on the home grid. Set by the organize service. */
+  /** Category label assigned by the organize service ("" until organized). */
+  category: string;
+  /** Lower = earlier within its category. Set by the organize service. */
   position: number;
   createdAt: number;
   updatedAt: number;
