@@ -9,6 +9,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
 import { unlockAudio } from "./lib/audio";
+import { installSpatialNav } from "./lib/spatial-nav";
 
 // Unlock iOS audio on the very first user gesture so the PM agent's
 // first_message plays immediately on iPad. Without this, the gesture
@@ -16,6 +17,10 @@ import { unlockAudio } from "./lib/audio";
 // frame arrives and iOS silently mutes playback. See lib/audio.ts.
 if (typeof document !== "undefined") {
   document.addEventListener("pointerdown", unlockAudio, { once: true });
+  // TV-remote D-pad: arrow keys move focus to the visually-closest
+  // focusable element. Without this, kids on Android TV get stuck on
+  // whichever header button auto-focused on load.
+  installSpatialNav();
 }
 
 const elem = document.getElementById("root")!;
