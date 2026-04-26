@@ -1,32 +1,17 @@
 import * as React from "react";
 
-// Minimal local types for Web Speech (lib.dom doesn't ship these everywhere).
-type SpeechRecognitionAlternative = { transcript: string };
-type SpeechRecognitionResult = {
-  isFinal: boolean;
-  0: SpeechRecognitionAlternative;
-  length: number;
-};
-type SpeechRecognitionResultList = {
-  length: number;
-  [index: number]: SpeechRecognitionResult | undefined;
-};
-type SpeechRecognitionEvent = {
-  resultIndex: number;
-  results: SpeechRecognitionResultList;
-};
-type SpeechRecognitionErrorEvent = { error: string };
-
 /**
- * Thin React hook around the browser's Web Speech API
- * (`webkitSpeechRecognition` / `SpeechRecognition`).
+ * MediaRecorder + ElevenLabs `scribe_v1` STT, proxied through the Mochi
+ * server (`POST /api/voice/transcribe`). Replaces the old browser Web
+ * Speech API path so transcription quality is consistent across iPad
+ * Safari, Android WebView, Chrome, etc.
  *
- * - Continuous = false: ends after the user pauses
- * - Interim results: transcript updates live as the user speaks
- * - Errors and unsupported browsers surface as `supported: false`
+ * Trade-off vs the previous webkitSpeechRecognition flow: no live interim
+ * transcripts. We capture audio for one utterance, auto-stop when the user
+ * pauses (RMS-based VAD on an AnalyserNode), POST the audio, and emit the
+ * final text via `onFinal` once the server responds.
  *
- * The actual transcription happens in the browser (Chrome / Edge / Android
- * WebView ship with a Google-cloud-backed implementation; Safari uses Apple's).
+ * The hook signature is preserved so KidShell doesn't change.
  */
 export type SpeechLang = "id-ID" | "en-US";
 
@@ -35,44 +20,22 @@ export const SPEECH_LANG_LABELS: Record<SpeechLang, string> = {
   "en-US": "EN",
 };
 
-type RecState = "idle" | "listening" | "denied" | "error";
-
-type AnyRecognition = {
-  lang: string;
-  continuous: boolean;
-  interimResults: boolean;
-  maxAlternatives: number;
-  start: () => void;
-  stop: () => void;
-  abort: () => void;
-  onresult: ((e: SpeechRecognitionEvent) => void) | null;
-  onerror: ((e: SpeechRecognitionErrorEvent) => void) | null;
-  onend: (() => void) | null;
-  onstart: (() => void) | null;
-};
-
-type AnyRecognitionCtor = new () => AnyRecognition;
-
-function getRecognitionCtor(): AnyRecognitionCtor | null {
-  if (typeof window === "undefined") return null;
-  const w = window as unknown as {
-    SpeechRecognition?: AnyRecognitionCtor;
-    webkitSpeechRecognition?: AnyRecognitionCtor;
-  };
-  return w.SpeechRecognition ?? w.webkitSpeechRecognition ?? null;
-}
+type RecState = "idle" | "listening" | "transcribing" | "denied" | "error";
 
 export type UseSpeechOptions = {
   lang: SpeechLang;
-  /** Called whenever the transcript updates (interim or final). */
-  onTranscript?: (text: string, isFinal: boolean) => void;
-  /** Called once the user finishes speaking with the final text. */
+  /** Called once the server returns a transcript. */
   onFinal?: (text: string) => void;
   /**
-   * Stop recognition after this many ms of silence following the most recent
-   * transcribed word. Browsers' built-in end-of-speech detection is sluggish
-   * (≈2 s in Chrome), so we close the loop ourselves. Set to 0 to disable.
-   * @default 800
+   * Stop recording after this many ms of silence following the most recent
+   * loud frame. The VAD only arms once at least one loud frame has been
+   * detected, so a slow start to speaking doesn't kill the recording.
+   * Set to 0 to disable auto-stop (caller must invoke `stop()`).
+   *
+   * 2000ms tolerates natural mid-thought pauses (kids especially);
+   * shorter values were cutting off short utterances after every
+   * inter-word gap.
+   * @default 2000
    */
   silenceMs?: number;
 };
@@ -85,135 +48,214 @@ export type UseSpeechReturn = {
   stop: () => void;
 };
 
-/**
- * Run a single utterance: tap start, the user talks, when they pause we hand
- * the final transcript back via `onFinal`. The hook is single-shot per call to
- * `start()`; the consumer drives subsequent recordings.
- */
+const RMS_THRESHOLD = 0.025; // ≈ -32 dBFS — quiet room is well below this
+
+/** Pick a MediaRecorder mime type that's widely supported. */
+function pickMimeType(): string {
+  if (typeof MediaRecorder === "undefined") return "";
+  const candidates = [
+    "audio/webm;codecs=opus",
+    "audio/webm",
+    "audio/mp4",
+    "audio/ogg;codecs=opus",
+  ];
+  for (const c of candidates) {
+    if (MediaRecorder.isTypeSupported(c)) return c;
+  }
+  return "";
+}
+
 export function useSpeech(opts: UseSpeechOptions): UseSpeechReturn {
-  const { lang, onTranscript, onFinal, silenceMs = 800 } = opts;
+  const { lang, onFinal, silenceMs = 2000 } = opts;
   const [supported, setSupported] = React.useState(false);
   const [state, setState] = React.useState<RecState>("idle");
   const [transcript, setTranscript] = React.useState("");
-  const recRef = React.useRef<AnyRecognition | null>(null);
-  const silenceMsRef = React.useRef(silenceMs);
 
-  React.useEffect(() => {
-    setSupported(getRecognitionCtor() != null);
-  }, []);
-
-  React.useEffect(() => {
-    silenceMsRef.current = silenceMs;
-  }, [silenceMs]);
-
-  // Latest callbacks via ref so we don't re-create the recognition object.
-  const onTranscriptRef = React.useRef(onTranscript);
+  // Mutable session state stays in refs so a re-render mid-recording doesn't
+  // restart the MediaRecorder.
+  const sessionRef = React.useRef<{
+    recorder: MediaRecorder;
+    stream: MediaStream;
+    audioCtx: AudioContext;
+    rafId: number | null;
+    chunks: Blob[];
+  } | null>(null);
+  const submitAbortRef = React.useRef<AbortController | null>(null);
   const onFinalRef = React.useRef(onFinal);
+  const silenceMsRef = React.useRef(silenceMs);
+  const langRef = React.useRef(lang);
   React.useEffect(() => {
-    onTranscriptRef.current = onTranscript;
     onFinalRef.current = onFinal;
+    silenceMsRef.current = silenceMs;
+    langRef.current = lang;
   });
 
-  const start = React.useCallback(() => {
-    const Ctor = getRecognitionCtor();
-    if (!Ctor) return;
-
-    // Replace any in-flight session.
-    recRef.current?.abort();
-
-    const rec = new Ctor();
-    rec.lang = lang;
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.maxAlternatives = 1;
-
-    let finalText = "";
-    let lastInterim = "";
-    let silenceTimer: ReturnType<typeof setTimeout> | null = null;
-
-    const armSilenceTimer = () => {
-      if (silenceMsRef.current <= 0) return;
-      if (silenceTimer) clearTimeout(silenceTimer);
-      silenceTimer = setTimeout(() => {
-        silenceTimer = null;
-        // Closing the recognition triggers `onend`, which submits whatever
-        // text we've accumulated so far.
-        try {
-          rec.stop();
-        } catch {
-          /* ignore — rec may already be stopping */
-        }
-      }, silenceMsRef.current);
-    };
-
-    const clearSilenceTimer = () => {
-      if (silenceTimer) {
-        clearTimeout(silenceTimer);
-        silenceTimer = null;
-      }
-    };
-
-    rec.onstart = () => {
-      setState("listening");
-      setTranscript("");
-    };
-    rec.onresult = (e) => {
-      let interim = "";
-      for (let i = e.resultIndex; i < e.results.length; i++) {
-        const result = e.results[i];
-        if (!result || !result[0]) continue;
-        const text = result[0].transcript;
-        if (result.isFinal) {
-          finalText += text;
-        } else {
-          interim += text;
-        }
-      }
-      lastInterim = interim;
-      const display = (finalText + interim).trim();
-      setTranscript(display);
-      onTranscriptRef.current?.(display, false);
-
-      // Restart the silence timer on every audible token. We only arm once we
-      // have *some* content so the user can pause initially without losing it.
-      if (display) armSilenceTimer();
-    };
-    rec.onerror = (e) => {
-      clearSilenceTimer();
-      const err = (e as { error?: string }).error;
-      if (err === "not-allowed" || err === "service-not-allowed") {
-        setState("denied");
-      } else {
-        setState("error");
-      }
-    };
-    rec.onend = () => {
-      clearSilenceTimer();
-      // Browsers don't always commit the latest interim as `final` when we
-      // force-stop, so fall back to the last interim if final is empty.
-      const cleaned = (finalText.trim() || lastInterim.trim());
-      if (cleaned) {
-        onTranscriptRef.current?.(cleaned, true);
-        onFinalRef.current?.(cleaned);
-      }
-      setState((s) => (s === "listening" ? "idle" : s));
-      recRef.current = null;
-    };
-
-    recRef.current = rec;
-    try {
-      rec.start();
-    } catch {
-      setState("error");
-    }
-  }, [lang]);
-
-  const stop = React.useCallback(() => {
-    recRef.current?.stop();
+  React.useEffect(() => {
+    const ok =
+      typeof navigator !== "undefined" &&
+      !!navigator.mediaDevices &&
+      typeof MediaRecorder !== "undefined" &&
+      pickMimeType() !== "";
+    setSupported(ok);
   }, []);
 
-  // On unmount, kill any in-flight session.
-  React.useEffect(() => () => recRef.current?.abort(), []);
+  const teardown = React.useCallback(() => {
+    const s = sessionRef.current;
+    if (!s) return;
+    sessionRef.current = null;
+    if (s.rafId !== null) cancelAnimationFrame(s.rafId);
+    try {
+      s.audioCtx.close();
+    } catch {
+      /* ignore */
+    }
+    for (const track of s.stream.getTracks()) {
+      try {
+        track.stop();
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
+  const submit = React.useCallback(
+    async (audio: Blob) => {
+      submitAbortRef.current?.abort();
+      const ctrl = new AbortController();
+      submitAbortRef.current = ctrl;
+      setState("transcribing");
+      try {
+        const url = `/api/voice/transcribe?lang=${encodeURIComponent(langRef.current)}`;
+        const res = await fetch(url, {
+          method: "POST",
+          headers: { "content-type": audio.type || "audio/webm" },
+          body: audio,
+          signal: ctrl.signal,
+        });
+        if (ctrl.signal.aborted) return;
+        if (!res.ok) throw new Error(`server ${res.status}`);
+        const data = (await res.json()) as { text?: string };
+        if (ctrl.signal.aborted) return;
+        const text = (data.text ?? "").trim();
+        setTranscript(text);
+        if (text) onFinalRef.current?.(text);
+        setState("idle");
+      } catch (err) {
+        if (ctrl.signal.aborted) return;
+        console.error("transcribe failed", err);
+        setState("error");
+      } finally {
+        if (submitAbortRef.current === ctrl) submitAbortRef.current = null;
+      }
+    },
+    [],
+  );
+
+  const start = React.useCallback(async () => {
+    if (sessionRef.current) return; // already recording
+    const mimeType = pickMimeType();
+    if (!mimeType) {
+      setState("error");
+      return;
+    }
+
+    let stream: MediaStream;
+    try {
+      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    } catch (err) {
+      const name = (err as { name?: string }).name ?? "";
+      setState(name === "NotAllowedError" || name === "SecurityError" ? "denied" : "error");
+      return;
+    }
+
+    const recorder = new MediaRecorder(stream, { mimeType });
+    const audioCtx = new AudioContext();
+    const source = audioCtx.createMediaStreamSource(stream);
+    const analyser = audioCtx.createAnalyser();
+    analyser.fftSize = 1024;
+    source.connect(analyser);
+    const buffer = new Uint8Array(analyser.fftSize);
+    const chunks: Blob[] = [];
+
+    let lastLoudAt = performance.now();
+    let everSpoke = false;
+    let rafId: number | null = null;
+
+    const tick = () => {
+      analyser.getByteTimeDomainData(buffer);
+      let sum = 0;
+      for (let i = 0; i < buffer.length; i += 1) {
+        const v = ((buffer[i] ?? 128) - 128) / 128;
+        sum += v * v;
+      }
+      const rms = Math.sqrt(sum / buffer.length);
+      if (rms > RMS_THRESHOLD) {
+        lastLoudAt = performance.now();
+        everSpoke = true;
+      }
+      const ms = silenceMsRef.current;
+      if (everSpoke && ms > 0 && performance.now() - lastLoudAt > ms) {
+        try {
+          recorder.stop();
+        } catch {
+          /* already stopping */
+        }
+        return;
+      }
+      rafId = requestAnimationFrame(tick);
+      if (sessionRef.current) sessionRef.current.rafId = rafId;
+    };
+
+    recorder.ondataavailable = (e) => {
+      if (e.data && e.data.size > 0) chunks.push(e.data);
+    };
+    recorder.onerror = () => {
+      teardown();
+      setState("error");
+    };
+    recorder.onstop = () => {
+      teardown();
+      const audio = new Blob(chunks, { type: mimeType });
+      if (audio.size === 0) {
+        setState("idle");
+        return;
+      }
+      void submit(audio);
+    };
+
+    sessionRef.current = { recorder, stream, audioCtx, rafId: null, chunks };
+    setTranscript("");
+    setState("listening");
+    recorder.start(100);
+    rafId = requestAnimationFrame(tick);
+    sessionRef.current.rafId = rafId;
+  }, [submit, teardown]);
+
+  const stop = React.useCallback(() => {
+    const s = sessionRef.current;
+    if (!s) return;
+    try {
+      s.recorder.stop();
+    } catch {
+      /* already stopping → onstop will fire */
+    }
+  }, []);
+
+  React.useEffect(
+    () => () => {
+      const s = sessionRef.current;
+      if (s) {
+        try {
+          s.recorder.stop();
+        } catch {
+          /* ignore */
+        }
+        teardown();
+      }
+      submitAbortRef.current?.abort();
+    },
+    [teardown],
+  );
 
   return { supported, state, transcript, start, stop };
 }

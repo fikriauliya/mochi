@@ -7,16 +7,18 @@ import { JobsLive } from "./Jobs";
 import { OrganizeLive } from "./Organize";
 import { PrintableLive } from "./Printable";
 import { RegistryLive } from "./Registry";
+import { VoiceLive } from "./Voice";
 
-// Registry, Claude, Build, Printable, and Organize are siblings; Jobs
-// consumes all of them. Then everything is resolved against BunContext
-// (FileSystem, Path, CommandExecutor).
+// Registry, Claude, Build, Printable, Organize, and Voice are siblings;
+// Jobs consumes only the first five (Voice is HTTP-only). Then everything
+// is resolved against BunContext (FileSystem, Path, CommandExecutor).
 const Siblings = Layer.mergeAll(
   RegistryLive,
   ClaudeLive,
   BuildLive,
   PrintableLive,
   OrganizeLive,
+  VoiceLive,
 );
 
 /** All services composed into a single Layer for the runtime. */

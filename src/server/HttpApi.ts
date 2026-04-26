@@ -8,6 +8,7 @@ import { OrganizeService } from "./Organize";
 import { PrintableService } from "./Printable";
 import { RegistryService } from "./Registry";
 import { type App, CreateAppRequest, PatchAppRequest } from "./Schema";
+import { VoiceService } from "./Voice";
 
 /** Services consumed by the HTTP route handlers. */
 export type MochiServices =
@@ -17,6 +18,7 @@ export type MochiServices =
   | BuildService
   | PrintableService
   | OrganizeService
+  | VoiceService
   | Path.Path;
 
 const SSE_HEADERS: Record<string, string> = {
@@ -278,6 +280,58 @@ export function makeRoutes(runtime: Runtime.Runtime<MochiServices>) {
         ? url.pathname.slice(prefix.length)
         : "index.html";
       return serveAppFile(req.params.id, rest || "index.html");
+    },
+
+    // ---- VOICE: ElevenLabs proxy (key stays server-side) ----
+    "/api/voice/transcribe": {
+      POST: (req: Request) =>
+        runP(
+          handle(
+            Effect.gen(function* () {
+              const buf = yield* Effect.tryPromise({
+                try: () => req.arrayBuffer(),
+                catch: () => new Error("invalid audio body"),
+              });
+              const audio = new Uint8Array(buf);
+              if (audio.byteLength === 0) {
+                return errorJson(400, "empty audio");
+              }
+              const mimeType =
+                req.headers.get("content-type") ?? "audio/webm";
+              const lang =
+                new URL(req.url).searchParams.get("lang") ?? undefined;
+              const voice = yield* VoiceService;
+              const text = yield* voice.transcribe(audio, mimeType, lang);
+              return okJson({ text });
+            }),
+          ),
+        ),
+    },
+
+    "/api/voice/tts": {
+      POST: (req: Request) =>
+        runP(
+          handle(
+            Effect.gen(function* () {
+              const body = yield* Effect.tryPromise({
+                try: () => req.json() as Promise<{ text?: string }>,
+                catch: () => new Error("invalid JSON body"),
+              });
+              const text = (body.text ?? "").trim();
+              if (!text) return errorJson(400, "text required");
+              if (text.length > 1000)
+                return errorJson(400, "text too long (max 1000 chars)");
+              const voice = yield* VoiceService;
+              const audio = yield* voice.synthesize(text);
+              return new Response(audio, {
+                headers: {
+                  "content-type": "audio/mpeg",
+                  "cache-control": "private, no-store",
+                },
+              });
+            }),
+          ),
+        ),
     },
 
     // ---- PWA: manifest, service worker, icons ----
