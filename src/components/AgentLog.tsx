@@ -33,7 +33,18 @@ export function AgentLog({ events, verbose = false }: Props) {
       {visible.length === 0 ? (
         <div className="text-ink-faint italic">Waiting for Mochi…</div>
       ) : (
-        visible.map((ev, i) => <LogLine key={i} ev={ev} verbose={verbose} />)
+        visible.map((ev, i) => (
+          <div key={i} className="flex gap-2">
+            {verbose && (
+              <span className="shrink-0 text-ink-faint tabular-nums w-12 text-right">
+                {typeof ev.t === "number" ? `+${(ev.t / 1000).toFixed(1)}s` : ""}
+              </span>
+            )}
+            <div className="flex-1 min-w-0">
+              <LogLine ev={ev} verbose={verbose} />
+            </div>
+          </div>
+        ))
       )}
     </div>
   );

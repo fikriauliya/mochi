@@ -164,36 +164,85 @@ export const JobsLive = Layer.effect(
       terminal: Ref.Ref<Option.Option<BuildEvent>>,
     ): Effect.Effect<void, never> =>
       Effect.gen(function* () {
+        const t0 = Date.now();
+        const elapsed = () => Date.now() - t0;
+        const stamp = <E extends BuildEvent>(ev: E): E => ({ ...ev, t: elapsed() });
+        const publish = (ev: BuildEvent) => pubsub.publish(stamp(ev));
+
         const cwd = path.join("apps", id);
         yield* fs.makeDirectory(cwd, { recursive: true }).pipe(Effect.ignore);
 
+        yield* Effect.log(
+          `[build ${id}] start kind=${kind} promptLen=${prompt.length}`,
+        );
+
         // Open Claude stream
+        const tSpawnStart = Date.now();
         const stream = yield* claude.spawn({
           cwd,
           sessionId,
           resume: kind === "modify",
           prompt,
         });
+        yield* Effect.log(
+          `[build ${id}] claude spawned in ${Date.now() - tSpawnStart}ms`,
+        );
 
         // Fanout each event. We always publish a `raw` event with the
         // full JSON for debug/verbose mode, then publish the projected
-        // kid-friendly event if the projector recognised it.
+        // kid-friendly event if the projector recognised it. We also
+        // record TTFT and per-tool timings into the server log for
+        // post-hoc analysis of slow builds.
+        let firstEventAt: number | null = null;
+        let lastToolStartAt: number | null = null;
+        let lastToolName: string | null = null;
         yield* stream.pipe(
           Stream.runForEach((raw) =>
             Effect.gen(function* () {
-              yield* pubsub.publish({
-                type: "raw",
-                json: JSON.stringify(raw),
-              });
+              if (firstEventAt === null) {
+                firstEventAt = Date.now();
+                const ttft = firstEventAt - t0;
+                yield* Effect.log(`[build ${id}] claude TTFT ${ttft}ms`);
+                yield* publish({
+                  type: "status",
+                  message: `claude first event at +${ttft}ms`,
+                });
+              }
+              yield* publish({ type: "raw", json: JSON.stringify(raw) });
               const ev = projectClaudeEvent(raw);
-              if (ev) yield* pubsub.publish(ev);
+              if (ev) {
+                if (ev.type === "tool") {
+                  lastToolStartAt = Date.now();
+                  lastToolName = ev.tool;
+                  yield* Effect.log(
+                    `[build ${id}] tool ${ev.tool} ${ev.summary} (+${elapsed()}ms)`,
+                  );
+                } else if (ev.type === "tool_result" && lastToolStartAt) {
+                  const took = Date.now() - lastToolStartAt;
+                  yield* Effect.log(
+                    `[build ${id}] tool ${lastToolName ?? "?"} ${ev.ok ? "ok" : "fail"} in ${took}ms`,
+                  );
+                  lastToolStartAt = null;
+                }
+                yield* publish(ev);
+              }
             }),
           ),
         );
 
+        const tClaudeEnd = Date.now();
+        yield* Effect.log(
+          `[build ${id}] claude stream ended after ${tClaudeEnd - t0}ms`,
+        );
+        yield* publish({
+          type: "status",
+          message: `claude stream ended (${tClaudeEnd - t0}ms total)`,
+        });
+
         // ----- Subprocess succeeded → read manifest -----
         // We always re-read on modify too, so an agent that updates the
         // manifest (e.g. picks a better emoji or rename) flows through.
+        const tManifestStart = Date.now();
         const manifestPath = path.join(cwd, "manifest.json");
         const manifestText = yield* fs.readFileString(manifestPath).pipe(
           Effect.mapError(
@@ -224,13 +273,23 @@ export const JobsLive = Layer.effect(
               }),
           ),
         );
+        yield* Effect.log(
+          `[build ${id}] manifest read in ${Date.now() - tManifestStart}ms`,
+        );
 
         // ----- Bundle index.tsx -----
-        yield* pubsub.publish({
+        const tBundleStart = Date.now();
+        yield* publish({
           type: "status",
-          message: "Mochi is folding the dough into a bundle…",
+          message: "bundling index.tsx…",
         });
         yield* builder.bundle(cwd, manifest.name);
+        const bundleMs = Date.now() - tBundleStart;
+        yield* Effect.log(`[build ${id}] bundle in ${bundleMs}ms`);
+        yield* publish({
+          type: "status",
+          message: `bundle complete in ${bundleMs}ms`,
+        });
 
         // ----- Persist + announce ready -----
         yield* registry.patch(id, {
@@ -241,7 +300,12 @@ export const JobsLive = Layer.effect(
           lastError: undefined,
         });
 
-        const done: BuildEvent = { type: "done" };
+        const total = elapsed();
+        yield* Effect.log(
+          `[build ${id}] DONE total=${total}ms (claude=${tClaudeEnd - t0}ms bundle=${bundleMs}ms)`,
+        );
+
+        const done: BuildEvent = stamp({ type: "done" });
         yield* Ref.set(terminal, Option.some(done));
         yield* pubsub.publish(done);
       }).pipe(
@@ -256,6 +320,7 @@ export const JobsLive = Layer.effect(
                 ? `${headline}\n${String((cause as { logs: unknown }).logs ?? "").slice(0, 1500)}`
                 : headline;
             const ev: BuildEvent = { type: "error", message: detail };
+            yield* Effect.logError(`[build ${id}] FAILED: ${headline}`);
             yield* registry
               .patch(id, { status: "error", lastError: detail })
               .pipe(Effect.ignore);

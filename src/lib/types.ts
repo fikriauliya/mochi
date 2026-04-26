@@ -14,11 +14,12 @@ export type App = {
   lastError?: string;
 };
 
+/** `t` is ms elapsed since the job started, when known. */
 export type BuildEvent =
-  | { type: "status"; message: string }
-  | { type: "text"; text: string }
-  | { type: "tool"; tool: string; summary: string }
-  | { type: "tool_result"; tool: string; ok: boolean; summary: string }
-  | { type: "done" }
-  | { type: "error"; message: string }
-  | { type: "raw"; json: string };
+  | { type: "status"; message: string; t?: number }
+  | { type: "text"; text: string; t?: number }
+  | { type: "tool"; tool: string; summary: string; t?: number }
+  | { type: "tool_result"; tool: string; ok: boolean; summary: string; t?: number }
+  | { type: "done"; t?: number }
+  | { type: "error"; message: string; t?: number }
+  | { type: "raw"; json: string; t?: number };

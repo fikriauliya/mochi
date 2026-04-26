@@ -36,17 +36,23 @@ export type ModifyAppRequest = CreateAppRequest;
 export const ClaudeStreamEvent = S.Record({ key: S.String, value: S.Unknown });
 export type ClaudeStreamEvent = S.Schema.Type<typeof ClaudeStreamEvent>;
 
-/** Lean event sent to the browser over SSE. */
+/**
+ * Lean event sent to the browser over SSE. Each variant carries an optional
+ * `t` (ms since the job started) so the UI can render a relative timeline
+ * and we can diagnose where build time goes. Replayed terminal events from
+ * the registry omit `t` since the original timing is gone.
+ */
+const T = S.optional(S.Number);
 export const BuildEvent = S.Union(
-  S.Struct({ type: S.Literal("status"), message: S.String }),
-  S.Struct({ type: S.Literal("text"), text: S.String }),
-  S.Struct({ type: S.Literal("tool"), tool: S.String, summary: S.String }),
-  S.Struct({ type: S.Literal("tool_result"), tool: S.String, ok: S.Boolean, summary: S.String }),
-  S.Struct({ type: S.Literal("done") }),
-  S.Struct({ type: S.Literal("error"), message: S.String }),
+  S.Struct({ type: S.Literal("status"), message: S.String, t: T }),
+  S.Struct({ type: S.Literal("text"), text: S.String, t: T }),
+  S.Struct({ type: S.Literal("tool"), tool: S.String, summary: S.String, t: T }),
+  S.Struct({ type: S.Literal("tool_result"), tool: S.String, ok: S.Boolean, summary: S.String, t: T }),
+  S.Struct({ type: S.Literal("done"), t: T }),
+  S.Struct({ type: S.Literal("error"), message: S.String, t: T }),
   // Full JSON of the original claude stream-json event. Always emitted
   // alongside the projection; the UI hides them unless verbose mode is on.
-  S.Struct({ type: S.Literal("raw"), json: S.String }),
+  S.Struct({ type: S.Literal("raw"), json: S.String, t: T }),
 );
 export type BuildEvent = S.Schema.Type<typeof BuildEvent>;
 
