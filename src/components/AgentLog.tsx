@@ -53,27 +53,26 @@ export function AgentLog({ events, verbose = false }: Props) {
 function LogLine({ ev, verbose }: { ev: BuildEvent; verbose: boolean }) {
   switch (ev.type) {
     case "status":
-      return <div className="text-ink-faint italic">~ {ev.message}</div>;
+      return <div className="text-ink-faint italic">{ev.message}</div>;
     case "text":
       return (
         <div className="text-ink whitespace-pre-wrap">
-          <span className="text-mochi-deep">›</span>{" "}
           {verbose ? ev.text : truncateLines(ev.text, 6)}
         </div>
       );
     case "tool":
       return (
         <div className="text-ink">
-          <span className={cn(toolClass(ev.tool))}>
-            {toolLabel(ev.tool)}
-          </span>
-          {ev.summary && <span className="text-ink-soft"> {ev.summary}</span>}
+          <span className={cn(toolClass(ev.tool))}>● {ev.tool}</span>
+          {ev.summary && (
+            <span className="text-ink-soft"> ({ev.summary})</span>
+          )}
         </div>
       );
     case "tool_result":
       return (
-        <div className={cn("flex items-start gap-1.5", ev.ok ? "text-dad" : "text-mom")}>
-          {ev.ok ? <Check className="size-3.5 mt-0.5 shrink-0" /> : <AlertCircle className="size-3.5 mt-0.5 shrink-0" />}
+        <div className={cn("flex items-start gap-1.5 pl-3", ev.ok ? "text-ink-soft" : "text-mom")}>
+          <span className="shrink-0">⎿</span>
           <span className={verbose ? "whitespace-pre-wrap break-all" : "truncate"}>
             {ev.summary || (ev.ok ? "ok" : "failed")}
           </span>
@@ -109,25 +108,6 @@ function prettyJson(s: string): string {
   }
 }
 
-function toolLabel(tool: string): string {
-  switch (tool) {
-    case "Write":
-      return "✎ write";
-    case "Edit":
-      return "✎ edit";
-    case "Read":
-      return "↳ read";
-    case "Bash":
-      return "$ bash";
-    case "Glob":
-      return "* glob";
-    case "Grep":
-      return "? grep";
-    default:
-      return `· ${tool.toLowerCase()}`;
-  }
-}
-
 function toolClass(tool: string): string {
   switch (tool) {
     case "Write":
@@ -136,7 +116,7 @@ function toolClass(tool: string): string {
     case "Bash":
       return "text-kenji font-semibold";
     default:
-      return "text-ink-soft";
+      return "text-ink-soft font-semibold";
   }
 }
 

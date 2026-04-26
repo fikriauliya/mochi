@@ -49,8 +49,6 @@ export class JobsService extends Context.Tag("JobsService")<
 
 const decodeManifest = S.decodeUnknown(Manifest);
 
-const nowStatus = (msg: string): BuildEvent => ({ type: "status", message: msg });
-
 /**
  * Project one raw claude stream-json event into a BuildEvent. The shape varies
  * by claude version; we extract the bits we care about and fall back gracefully
@@ -58,11 +56,6 @@ const nowStatus = (msg: string): BuildEvent => ({ type: "status", message: msg }
  */
 export function projectClaudeEvent(raw: ClaudeStreamEvent): BuildEvent | null {
   const type = (raw["type"] as string | undefined) ?? "";
-  const subtype = (raw["subtype"] as string | undefined) ?? "";
-
-  if (type === "system" && subtype === "init") {
-    return nowStatus("Mochi is preparing the kitchen…");
-  }
 
   if (type === "assistant") {
     const message = raw["message"] as { content?: Array<unknown> } | undefined;
@@ -272,10 +265,6 @@ export const JobsLive = Layer.effect(
           yield* Effect.log(
             `[build ${id}] gpt-image-2 + gpt-4o-mini returned in ${Date.now() - tStart}ms (${png.byteLength} bytes)`,
           );
-          yield* publish({
-            type: "status",
-            message: `image ready (${Math.round(png.byteLength / 1024)} KB) — saving…`,
-          });
 
           yield* fs
             .writeFile(path.join(cwd, "print.png"), png)
@@ -365,12 +354,9 @@ export const JobsLive = Layer.effect(
             Effect.gen(function* () {
               if (firstEventAt === null) {
                 firstEventAt = Date.now();
-                const ttft = firstEventAt - t0;
-                yield* Effect.log(`[build ${id}] claude TTFT ${ttft}ms`);
-                yield* publish({
-                  type: "status",
-                  message: `claude first event at +${ttft}ms`,
-                });
+                yield* Effect.log(
+                  `[build ${id}] claude TTFT ${firstEventAt - t0}ms`,
+                );
               }
               yield* publish({ type: "raw", json: JSON.stringify(raw) });
 
@@ -428,10 +414,6 @@ export const JobsLive = Layer.effect(
         yield* Effect.log(
           `[build ${id}] claude stream ended after ${tClaudeEnd - t0}ms`,
         );
-        yield* publish({
-          type: "status",
-          message: `claude stream ended (${tClaudeEnd - t0}ms total)`,
-        });
 
         // ----- Subprocess succeeded → read manifest -----
         // We always re-read on modify too, so an agent that updates the
@@ -473,17 +455,9 @@ export const JobsLive = Layer.effect(
 
         // ----- Bundle index.tsx -----
         const tBundleStart = Date.now();
-        yield* publish({
-          type: "status",
-          message: "bundling index.tsx…",
-        });
         yield* builder.bundle(cwd, manifest.name);
         const bundleMs = Date.now() - tBundleStart;
         yield* Effect.log(`[build ${id}] bundle in ${bundleMs}ms`);
-        yield* publish({
-          type: "status",
-          message: `bundle complete in ${bundleMs}ms`,
-        });
 
         // ----- Persist + announce ready -----
         yield* registry.patch(id, {

@@ -34,9 +34,9 @@ const StubPrintableLive = Layer.succeed(
 // ---------- Pure projection unit tests ----------
 
 describe("projectClaudeEvent", () => {
-  test("system/init → status", () => {
+  test("system/init → null (server log only, not user-visible)", () => {
     const ev = projectClaudeEvent({ type: "system", subtype: "init" });
-    expect(ev?.type).toBe("status");
+    expect(ev).toBeNull();
   });
 
   test("assistant text block → text event", () => {
