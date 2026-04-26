@@ -118,6 +118,11 @@ const conversationalConfig = {
   },
   turn: {
     turn_timeout: 7,
+    // Speak the first_message ~immediately on connect instead of
+    // waiting for the kid to talk first. ElevenLabs requires -1 or
+    // 1..300; null (default) makes it user-led and the greeting only
+    // fires after it detects silence. 1 = wait 1 second.
+    initial_wait_time: 1,
   },
   conversation: {
     max_duration_seconds: 600,
